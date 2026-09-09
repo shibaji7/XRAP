@@ -6,6 +6,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
+📖 **[Model documentation & XRAP-vs-DRAP2 comparison → `docs/model.md`](docs/model.md)**
+
 Estimate solar-flare-driven **HF radio-wave absorption** for a specific HF
 frequency, parameterized by:
 
@@ -257,7 +259,19 @@ src/xrap/
   data/            bundled coefficients / lookup tables
 tests/             pytest suite + fixtures (synthetic GOES flare);
                    `network`-marked tests download real data (`pytest --run-network`)
+docs/
+  model.md         model derivations, grazing treatment, XRAP-vs-DRAP2 comparison
+  make_figures.py  regenerate the figures in model.md (needs network + matplotlib)
+  images/          generated figures
 ```
+
+## Documentation
+
+[`docs/model.md`](docs/model.md) — full equations and coefficients for both
+models, the terminator / Chapman-grazing treatment, and a worked
+**XRAP-vs-DRAP2 comparison** (with figures) explaining why DRAP2's
+`log10(flux)` form underestimates strong flares (low by ~3× at X1, ~19× at X10)
+while the two models cross over around M2.
 
 ## References
 
