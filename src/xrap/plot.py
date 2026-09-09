@@ -7,8 +7,19 @@ the rest of the package has no hard matplotlib dependency.
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 
 __all__ = ["plot_xrs", "plot_absorption"]
+
+
+def _mpl_times(values):
+    """Coerce a time axis to tz-naive ``datetime64[ns]`` matplotlib can plot.
+
+    Handles tz-aware indexes and object arrays of Timestamps, which otherwise
+    trip an ``OverflowError`` in older matplotlib date handling.
+    """
+    idx = pd.DatetimeIndex(pd.to_datetime(values, utc=True))
+    return idx.tz_convert("UTC").tz_localize(None).to_numpy()
 
 #: GOES flare classes and their 0.1-0.8 nm flux thresholds (W m-2).
 _FLARE_CLASSES = [("A", 1e-8), ("B", 1e-7), ("C", 1e-6), ("M", 1e-5), ("X", 1e-4)]
@@ -53,7 +64,7 @@ def plot_xrs(
     if ax is None:
         _, ax = plt.subplots(figsize=(9, 4))
 
-    t = np.asarray(ds["time"].values)
+    t = _mpl_times(ds["time"].values)
     for b in bands:
         if b in ds:
             y = np.asarray(ds[b].values, dtype=float)
@@ -118,7 +129,7 @@ def plot_absorption(df, *, ax=None, column="absorption_db", label=None, color=No
     if ax is None:
         _, ax = plt.subplots(figsize=(9, 4))
 
-    ax.plot(np.asarray(df.index.values), np.asarray(df[column].values, dtype=float),
+    ax.plot(_mpl_times(df.index.values), np.asarray(df[column].values, dtype=float),
             lw=1.2, label=label, color=color)
     # y from 0 up to the max of *all* traces (so overlaid models both fit)
     ymax = max(

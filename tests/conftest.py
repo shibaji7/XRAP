@@ -34,8 +34,12 @@ def pytest_collection_modifyitems(config, items):
 
 @pytest.fixture
 def sample_times():
-    """A short 1-min UTC index around the 2017-09-06 X9.3 flare."""
-    return pd.date_range("2017-09-06T11:30", "2017-09-06T12:30", freq="1min", tz="UTC")
+    """A short 1-min index around the 2017-09-06 X9.3 flare.
+
+    Timezone-naive UTC datetime64, matching what :func:`xrap.fetch_goes_xrs`
+    returns.
+    """
+    return pd.date_range("2017-09-06T11:30", "2017-09-06T12:30", freq="1min")
 
 
 @pytest.fixture
