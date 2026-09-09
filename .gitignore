@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+src/xrap/_version.py
+
+# Env / tooling
+.venv/
+env/
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+
+# Data caches / downloads
+~/.xrap/
+*.nc
+!src/xrap/data/*.nc
+data_cache/
+sunpy/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store

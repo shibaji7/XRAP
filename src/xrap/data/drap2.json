@@ -1,0 +1,10 @@
+{
+  "_model": "DRAP2 solar-flare (X-ray) D-region absorption -- NOAA Global D-Region Absorption Prediction v2",
+  "_doc": "https://www.spaceweather.gov/content/global-d-region-absorption-prediction-documentation",
+  "_form": "HAF0 [MHz] = haf_slope*log10(flux) + haf_intercept;  HAF(chi) = HAF0*(cos chi)^sza_exponent (0 for chi>=90);  A(f,chi) [dB, one-way] = 0.5 * haf_threshold_db * (HAF(chi)/f)^freq_exponent",
+  "haf_slope": 10.0,
+  "haf_intercept": 65.0,
+  "sza_exponent": 0.75,
+  "freq_exponent": 1.5,
+  "haf_threshold_db": 1.0
+}

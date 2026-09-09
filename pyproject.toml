@@ -1,0 +1,97 @@
+[build-system]
+requires = ["setuptools>=64", "setuptools_scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xrap"
+dynamic = ["version"]
+description = "X-Ray Absorption Prediction: solar-flare-driven HF radio absorption for a given HF frequency, parameterized by solar zenith angle, HF frequency, and GOES X-ray flux."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Shibaji Chakraborty", email = "shibaji22@gmail.com" },
+]
+keywords = ["ionosphere", "HF", "radio", "absorption", "solar flare", "space weather", "GOES", "D-region"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+
+# Runtime dependencies. Installers (`pip install .`) will pull these automatically.
+dependencies = [
+    "numpy>=1.23",
+    "scipy>=1.10",
+    "pandas>=2.0",
+    "xarray>=2023.1",
+    "astropy>=5.3",
+    "sunpy>=5.0",              # GOES/XRS client + Fido search (flares >= 2010)
+    "requests>=2.28",         # fallback direct downloads for prior events
+    "python-dateutil>=2.8",
+]
+
+[project.optional-dependencies]
+# Extra data sources for pre-2010 / archived events (filled in later).
+netcdf = ["netCDF4>=1.6", "h5netcdf>=1.1"]
+plot = ["matplotlib>=3.7"]
+test = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "pytest-mock>=3.11",
+    "responses>=0.23",       # mock HTTP for download tests
+    "matplotlib>=3.7",       # exercised by the plotting tests
+]
+dev = [
+    "xrap[test,plot,netcdf]",
+    "ruff>=0.4",
+    "build>=1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/shibaji7/XRAP"
+Repository = "https://github.com/shibaji7/XRAP"
+Issues = "https://github.com/shibaji7/XRAP/issues"
+
+[project.scripts]
+xrap = "xrap.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+xrap = ["data/*.json", "data/*.csv", "data/*.nc"]
+
+[tool.setuptools_scm]
+version_file = "src/xrap/_version.py"
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra --cov=xrap --cov-report=term-missing --cov-report=xml"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["xrap"]
+omit = ["src/xrap/_version.py"]
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+# __all__ ordering and dict()-literal style are deliberate here.
+ignore = ["RUF022", "C408"]

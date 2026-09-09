@@ -1,0 +1,10 @@
+{
+  "_model": "XRAP -- Fiori, Chakraborty & Nikitina (2022) data-optimized shortwave-fadeout absorption",
+  "_doc": "doi:10.1016/j.jastp.2022.105843",
+  "_form": "A(f0) = scale * flux^flux_exponent * g(chi)^cos_exponent   [dB, one-way, at f0 MHz]; A(f) = (f0/f)^freq_exponent * A(f0); A >= 0.  flux = GOES 0.1-0.8 nm (W/m^2).  g(chi) = cos(chi) (hard, 0 for chi>=90) or 1/Ch(chi) (grazing).",
+  "scale": 12080.0,
+  "flux_exponent": 1.0,
+  "cos_exponent": 1.0,
+  "f0_mhz": 30.0,
+  "freq_exponent": 1.5
+}
