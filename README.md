@@ -39,6 +39,10 @@ Chapman grazing function `1/Ch(chi)` (`grazing=True`, the default for `"xrap"`)
 — a small positive value that decays smoothly to zero at the true terminator
 (~99.6° at 90 km).
 
+**[`docs/model.md`](docs/model.md)** has the full derivations, the grazing
+treatment, and a worked **XRAP-vs-DRAP2 comparison** (with figures) showing why
+DRAP2 underestimates strong flares.
+
 > Status: `sza`, both `absorption` models, the `sunpy` / `noaa_json` GOES routes,
 > the `xrap` CLI, and the plot helpers are implemented and tested. Still stubbed:
 > the `netcdf_url` / `local` GOES routes (pre-2010 / archived events) and
