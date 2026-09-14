@@ -115,6 +115,14 @@ dB_20 = xrap.scale_frequency(dB, f0_mhz=10.0, f_mhz=20.0, n=2.0) # custom expone
 model = xrap.AbsorptionModel(freq_mhz=10.0, model="xrap")
 df = model.predict(lat=40.0, lon=-105.0,
                    start="2017-09-06T11:00", end="2017-09-06T13:00")
+
+# oblique tx-rx circuit (secant law, 1+ hops) instead of a vertical point
+tx, rx = (35.0, 25.0), (48.0, 5.0)  # (lat, lon) transmitter, receiver
+dB_oblique = xrap.oblique_absorption(tx, rx, "2017-09-06T12:02Z", 10.0, xray_wm2=1e-5,
+                                     n_hops=1, earth_model="curved", height_model="fixed",
+                                     height_km=300.0)
+#   height_model="parabolic", foF2_mhz=..., hmF2_km=..., ym_km=...  -> frequency-dependent
+#   reflection height instead of a fixed one
 ```
 
 ### GOES data sources
@@ -253,6 +261,7 @@ src/xrap/
   sza.py           SZA from lat/lon/time (astropy + NOAA analytic)
   goes.py          GOES/XRS retrieval (sunpy / noaa_json / netcdf_url / local)
   absorption.py    absorption models: "xrap" (Fiori 2022) + "drap2"
+  oblique.py       oblique/multi-hop absorption (secant law + hop geometry)
   model.py         AbsorptionModel — end-to-end orchestration
   plot.py          plot_xrs / plot_absorption — quick-look figures (needs matplotlib)
   cli.py           `xrap` command line
@@ -260,18 +269,26 @@ src/xrap/
 tests/             pytest suite + fixtures (synthetic GOES flare);
                    `network`-marked tests download real data (`pytest --run-network`)
 docs/
-  model.md         model derivations, grazing treatment, XRAP-vs-DRAP2 comparison
-  make_figures.py  regenerate the figures in model.md (needs network + matplotlib)
-  images/          generated figures
+  model.md                model derivations, grazing treatment, XRAP-vs-DRAP2 comparison
+  oblique.md              oblique/multi-hop absorption: secant-law derivation + worked example
+  make_figures.py         regenerate the figures in model.md (needs network + matplotlib)
+  make_oblique_figures.py regenerate the figure in oblique.md (needs network + matplotlib)
+  images/                 generated figures
 ```
 
 ## Documentation
 
 [`docs/model.md`](docs/model.md) — full equations and coefficients for both
-models, the terminator / Chapman-grazing treatment, and a worked
+vertical models, the terminator / Chapman-grazing treatment, and a worked
 **XRAP-vs-DRAP2 comparison** (with figures) explaining why DRAP2's
 `log10(flux)` form underestimates strong flares (low by ~3× at X1, ~19× at X10)
 while the two models cross over around M2.
+
+[`docs/oblique.md`](docs/oblique.md) — the **secant-law derivation** (from
+Bouguer's theorem and Martyn's equivalence theorem) for oblique/multi-hop
+absorption, the flat- vs curved-earth hop geometry, the fixed vs
+quasi-parabolic reflection-height models, and a worked example validated
+against the analytic obliquity factor to 0.2%.
 
 ## References
 

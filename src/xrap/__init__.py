@@ -38,6 +38,7 @@ from .absorption import (
 )
 from .goes import fetch_goes_flares, fetch_goes_xrs
 from .model import AbsorptionModel
+from .oblique import hop_crossings, oblique_absorption, obliquity_factor
 from .plot import plot_absorption, plot_xrs
 from .sza import (
     chapman_function,
@@ -55,6 +56,9 @@ __all__ = [
     "fetch_goes_xrs",
     "fetch_goes_flares",
     "AbsorptionModel",
+    "oblique_absorption",
+    "hop_crossings",
+    "obliquity_factor",
     "plot_xrs",
     "plot_absorption",
     "solar_zenith_angle",
