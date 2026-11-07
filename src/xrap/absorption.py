@@ -23,6 +23,15 @@ Two models, selected with ``model=``:
 
 Both return **one-way** vertical absorption; ``path="total"`` doubles it.
 
+Low-frequency saturation
+------------------------
+``(30/f)**1.5`` diverges toward 0 Hz (22.6x at 3.75 MHz, 68x at 1.8 MHz). XRAP
+therefore saturates it below ``freq_saturation_mhz`` (default 5 MHz; continuous,
+power law unchanged above, bounded by ``2 (30/5)**1.5 = 29.4`` as f -> 0); see
+:func:`scale_frequency`. DRAP2 keeps its published, unsaturated form unless you
+opt in. Pass ``freq_saturation_mhz=None`` to disable, or a float to move the
+corner.
+
 Flux scale
 ----------
 ``flux`` must be on the **NOAA flare-class scale** (``X9.3 = 9.3e-4 W m-2``),
@@ -131,6 +140,7 @@ def absorption(
     alt_km: float = 90.0,
     H_km: float = 7.0,
     clip_negative: bool = True,
+    freq_saturation_mhz: float | str | None = "default",
 ) -> np.ndarray:
     """Solar-flare D-region absorption in dB.
 
@@ -156,6 +166,12 @@ def absorption(
         Absorbing-layer altitude / neutral scale height (grazing only).
     clip_negative : bool
         Clip the result to >= 0 dB.
+    freq_saturation_mhz : float, None or "default"
+        Low-frequency saturation corner (MHz; see :func:`scale_frequency`): the
+        ``f**-n`` law is replaced below this frequency by a bounded one, so the
+        absorption stops diverging toward 0 Hz. ``"default"`` (default) uses the
+        model's own setting -- 5 MHz for ``"xrap"``, off for ``"drap2"`` (faithful
+        to its published form); a float overrides it; ``None`` disables it.
 
     Returns
     -------
@@ -175,7 +191,8 @@ def absorption(
     chi = np.asarray(sza_deg, dtype=float)
     phi = np.asarray(xray_wm2, dtype=float)
 
-    gz = dict(grazing=grazing, alt_km=alt_km, H_km=H_km)
+    gz = dict(grazing=grazing, alt_km=alt_km, H_km=H_km,
+              f_sat=_resolve_saturation(freq_saturation_mhz, c))
     if model == "xrap":
         L = _absorption_xrap(f, chi, phi, c, **gz)
     else:
@@ -213,20 +230,51 @@ def reference_absorption(
 
 
 # --------------------------------------------------------------------------- #
+# Frequency law (shared), with optional low-frequency saturation
+# --------------------------------------------------------------------------- #
+def _frequency_law(f_mhz, n: float, f_sat_mhz: float | None):
+    """The ``f**-n`` frequency dependence, optionally saturated below ``f_sat_mhz``.
+
+    ``f_sat_mhz is None``  ->  ``f**-n`` (unbounded as f -> 0).
+    otherwise, ``f**-n`` for ``f >= f_sat`` and ``2 / (f**n + f_sat**n)`` below it:
+    continuous at ``f_sat`` (both equal ``f_sat**-n``), bounded by
+    ``2 f_sat**-n`` as f -> 0. The power law above ``f_sat`` is left exactly
+    unchanged.
+    """
+    f = np.asarray(f_mhz, dtype=float)
+    pure = f ** (-n)
+    if f_sat_mhz is None:
+        return pure
+    return np.where(f >= f_sat_mhz, pure, 2.0 / (f**n + f_sat_mhz**n))
+
+
+def _resolve_saturation(freq_saturation_mhz, coeffs: dict):
+    """``"default"`` -> the model's own ``freq_saturation_mhz`` (None if it has none)."""
+    if isinstance(freq_saturation_mhz, str):
+        if freq_saturation_mhz != "default":
+            raise ValueError(
+                f"freq_saturation_mhz must be a float, None or 'default', got {freq_saturation_mhz!r}"
+            )
+        return coeffs.get("freq_saturation_mhz")
+    return freq_saturation_mhz
+
+
+# --------------------------------------------------------------------------- #
 # Model implementations (return one-way dB)
 # --------------------------------------------------------------------------- #
-def _absorption_xrap(f, chi, phi, c, *, grazing, alt_km, H_km) -> np.ndarray:
+def _absorption_xrap(f, chi, phi, c, *, grazing, alt_km, H_km, f_sat) -> np.ndarray:
     a_f0 = reference_absorption(chi, phi, coeffs=c, grazing=grazing,
                                alt_km=alt_km, H_km=H_km)
-    return scale_frequency(a_f0, c["f0_mhz"], f, n=c["freq_exponent"])
+    return scale_frequency(a_f0, c["f0_mhz"], f, n=c["freq_exponent"], f_sat_mhz=f_sat)
 
 
-def _absorption_drap2(f, chi, phi, c, *, grazing, alt_km, H_km) -> np.ndarray:
+def _absorption_drap2(f, chi, phi, c, *, grazing, alt_km, H_km, f_sat) -> np.ndarray:
     haf = highest_affected_frequency(
         phi, chi, coeffs=c, grazing=grazing, alt_km=alt_km, H_km=H_km
     )
+    n = c["freq_exponent"]
     with np.errstate(divide="ignore", invalid="ignore"):
-        total = c["haf_threshold_db"] * (haf / f) ** c["freq_exponent"]
+        total = c["haf_threshold_db"] * haf**n * _frequency_law(f, n, f_sat)  # = (HAF/f)^n
     total = np.where(haf > 0.0, total, 0.0)
     return 0.5 * total  # one-way
 
@@ -264,10 +312,21 @@ def highest_affected_frequency(
 # --------------------------------------------------------------------------- #
 # Frequency scaling
 # --------------------------------------------------------------------------- #
-def scale_frequency(absorption_db, f0_mhz, f_mhz, *, n: float | None = None):
+def scale_frequency(
+    absorption_db, f0_mhz, f_mhz, *, n: float | None = None, f_sat_mhz: float | None = None
+):
     """Scale an absorption value from one HF frequency to another.
 
         A(f) = (f0 / f) ** n * A(f0)     [dB]
+
+    With ``f_sat_mhz`` the law saturates below that frequency (continuous, and
+    unchanged above it)::
+
+        A(f) = 2 f0**n / (f**n + f_sat**n) * A(f0)       for f < f_sat
+
+    which is bounded by ``2 (f0 / f_sat)**n * A(f0)`` as ``f -> 0`` instead of
+    diverging. Physically, D-region collisions dominate at low frequency and
+    absorption stops depending on frequency.
 
     Parameters
     ----------
@@ -278,6 +337,8 @@ def scale_frequency(absorption_db, f0_mhz, f_mhz, *, n: float | None = None):
     n : float, optional
         Exponent. Defaults to 1.5 (Hargreaves; used by both XRAP and DRAP2);
         pass another value to override.
+    f_sat_mhz : float, optional
+        Saturation corner (MHz). ``None`` (default here) keeps the pure power law.
 
     Returns
     -------
@@ -287,8 +348,7 @@ def scale_frequency(absorption_db, f0_mhz, f_mhz, *, n: float | None = None):
     exponent = 1.5 if n is None else n
     a0 = np.asarray(absorption_db, dtype=float)
     f0 = np.asarray(f0_mhz, dtype=float)
-    f = np.asarray(f_mhz, dtype=float)
-    return (f0 / f) ** exponent * a0
+    return f0**exponent * _frequency_law(f_mhz, exponent, f_sat_mhz) * a0
 
 
 def polar_cap_absorption(*args, **kwargs):

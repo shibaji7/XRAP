@@ -24,6 +24,19 @@ import argparse
 import sys
 
 
+def _saturation_arg(text: str):
+    """``--freq-saturation``: a float (MHz), ``none`` (disable) or ``default``."""
+    t = text.strip().lower()
+    if t in ("none", "off"):
+        return None
+    if t == "default":
+        return "default"
+    try:
+        return float(t)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected a number, 'none' or 'default', got {text!r}") from None
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="xrap", description="X-Ray Absorption Prediction (DRAP2 solar-flare)")
     sub = p.add_subparsers(dest="command", required=True)
@@ -45,6 +58,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pp.add_argument("--sza-method", default="noaa", choices=("noaa", "astropy"))
     pp.add_argument("--path", default="oneway", choices=("oneway", "total"))
+    pp.add_argument(
+        "--freq-saturation", type=_saturation_arg, default="default", metavar="MHZ|none",
+        help="low-frequency saturation corner of the f^-1.5 law (default: 5 MHz for xrap, "
+             "off for drap2); 'none' disables it",
+    )
     pp.add_argument(
         "--grazing", action=argparse.BooleanOptionalAction, default=None,
         help="Chapman grazing correction (default: on for xrap, off for drap2)",
@@ -89,6 +107,7 @@ def _cmd_predict(args) -> int:
         goes_source=args.goes_source,
         path=args.path,
         grazing=args.grazing,
+        freq_saturation_mhz=args.freq_saturation,
     )
     goes_kwargs = {"flare_scale": args.flare_scale}
     if args.satellite is not None:

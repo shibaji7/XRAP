@@ -409,6 +409,7 @@ def oblique_absorption(
     hmF2_km: float | None = None,
     ym_km: float | None = None,
     obliquity_exponent: float = 1.0,
+    freq_saturation_mhz: float | str | None = "default",
     clip_negative: bool = True,
 ) -> np.ndarray:
     """Total oblique HF absorption (dB) for an ``n_hops``-hop tx-rx circuit.
@@ -442,6 +443,9 @@ def oblique_absorption(
     obliquity_exponent : float
         Exponent of the secant factor; 1 (default) is the non-deviative
         path-length law (see the module docstring).
+    freq_saturation_mhz : float, None or "default"
+        Low-frequency saturation of the vertical law, forwarded to
+        :func:`xrap.absorption.absorption` (XRAP default 5 MHz; ``None`` disables).
     clip_negative : bool
         Clip the summed result to >= 0 dB.
 
@@ -463,6 +467,7 @@ def oblique_absorption(
         L_v = absorption(
             freq_mhz, chi, xray_wm2, model=model, coeffs=coeffs, path="oneway",
             grazing=grazing, alt_km=alt_km, H_km=H_km, clip_negative=False,
+            freq_saturation_mhz=freq_saturation_mhz,
         )
         total = total + obliquity_factor(cr.incidence_deg, exponent=obliquity_exponent) * L_v
 

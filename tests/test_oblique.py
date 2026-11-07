@@ -352,3 +352,22 @@ def test_obliquity_exponent_zero_removes_obliquity():
     tot = oblique_absorption(tx, rx, "2017-09-06T12:00Z", 10.0, 1e-4, height_km=300.0,
                              grazing=False, obliquity_exponent=0.0)
     assert float(np.ravel(tot)[0]) == pytest.approx(vsum, rel=1e-9)
+
+
+# --------------------------------------------------------------------------- #
+# Low-frequency saturation is forwarded through the oblique path
+# --------------------------------------------------------------------------- #
+def test_oblique_forwards_the_frequency_saturation():
+    tx, rx = (10.0, 20.0), (10.0, 40.0)
+    kw = dict(height_km=300.0, grazing=False)
+    sat = float(np.ravel(oblique_absorption(tx, rx, "2017-09-06T12:00Z", 3.75, 9e-4, **kw))[0])
+    raw = float(np.ravel(oblique_absorption(tx, rx, "2017-09-06T12:00Z", 3.75, 9e-4,
+                                            freq_saturation_mhz=None, **kw))[0])
+    s_sat = 2 * 30**1.5 / (3.75**1.5 + 5.0**1.5)
+    s_raw = (30.0 / 3.75) ** 1.5
+    assert sat < raw
+    assert sat / raw == pytest.approx(s_sat / s_raw, rel=1e-9)   # obliquity is frequency-independent
+    # above the corner nothing changes
+    a = oblique_absorption(tx, rx, "2017-09-06T12:00Z", 10.0, 9e-4, **kw)
+    b = oblique_absorption(tx, rx, "2017-09-06T12:00Z", 10.0, 9e-4, freq_saturation_mhz=None, **kw)
+    assert a == pytest.approx(b)

@@ -41,6 +41,8 @@ class AbsorptionModel:
         default (True for ``"xrap"``, False for ``"drap2"``).
     alt_km, H_km : float
         Absorbing-layer altitude and neutral scale height (grazing only).
+    freq_saturation_mhz : float, None or "default"
+        Low-frequency saturation corner (see :func:`xrap.absorption`).
     coeffs : dict, optional
         Coefficient override; defaults to the bundled set for ``model``.
     """
@@ -53,6 +55,7 @@ class AbsorptionModel:
     grazing: bool | None = None
     alt_km: float = 90.0
     H_km: float = 7.0
+    freq_saturation_mhz: float | str | None = "default"
     coeffs: dict | None = None
 
     def _absorption(self, freq_mhz, sza_deg, xray_wm2):
@@ -60,6 +63,7 @@ class AbsorptionModel:
             freq_mhz, sza_deg, xray_wm2,
             model=self.model, coeffs=self.coeffs, path=self.path,
             grazing=self.grazing, alt_km=self.alt_km, H_km=self.H_km,
+            freq_saturation_mhz=self.freq_saturation_mhz,
         )
 
     def predict(

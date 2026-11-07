@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import argparse
+
 import pandas as pd
 import pytest
 
@@ -89,3 +91,27 @@ def test_fetch_goes_writes_netcdf(tmp_path, mocker):
 
     with xr.open_dataset(out) as ds:
         assert {"xrsa", "xrsb"} <= set(ds.data_vars)
+
+
+def test_freq_saturation_flag_parsing():
+    from xrap.cli import _saturation_arg
+
+    assert _saturation_arg("none") is None
+    assert _saturation_arg("default") == "default"
+    assert _saturation_arg("3.5") == 3.5
+    with pytest.raises(argparse.ArgumentTypeError):
+        _saturation_arg("banana")
+
+
+def test_predict_freq_saturation_changes_low_frequency_output(tmp_path, synthetic_xrs, mocker):
+    mocker.patch("xrap.model.fetch_goes_xrs", return_value=synthetic_xrs)
+
+    def peak(extra):
+        out = tmp_path / "o.csv"
+        main(["predict", "--lat", "20", "--lon", "30", "--freq", "3.75",
+              "--start", "2017-09-06T11:30", "--end", "2017-09-06T12:30",
+              "-o", str(out), *extra])
+        return pd.read_csv(out, index_col=0)["absorption_db"].max()
+
+    assert peak(["--freq-saturation", "none"]) > peak([])              # default 5 MHz saturates
+    assert peak(["--freq-saturation", "5"]) == pytest.approx(peak([]))

@@ -194,3 +194,80 @@ def test_polar_cap_absorption_not_implemented():
 
     with pytest.raises(NotImplementedError):
         polar_cap_absorption()
+
+
+# --------------------------------------------------------------------------- #
+# Low-frequency saturation of the f^-n law
+# --------------------------------------------------------------------------- #
+def test_scale_frequency_saturation_is_continuous_at_the_corner():
+    lo = scale_frequency(1.0, 30.0, 5.0 - 1e-9, f_sat_mhz=5.0)
+    hi = scale_frequency(1.0, 30.0, 5.0, f_sat_mhz=5.0)
+    assert lo == pytest.approx(hi, rel=1e-6)
+    assert hi == pytest.approx((30.0 / 5.0) ** 1.5)
+
+
+def test_scale_frequency_saturation_leaves_the_power_law_above_the_corner():
+    f = np.array([5.0, 7.0, 10.0, 20.0, 30.0])
+    np.testing.assert_allclose(scale_frequency(1.0, 30.0, f, f_sat_mhz=5.0),
+                               scale_frequency(1.0, 30.0, f))
+
+
+def test_scale_frequency_saturation_is_bounded_below_the_corner():
+    f = np.array([4.0, 3.75, 1.8, 0.5, 0.01, 1e-6])
+    s = scale_frequency(1.0, 30.0, f, f_sat_mhz=5.0)
+    limit = 2.0 * (30.0 / 5.0) ** 1.5
+    assert np.all(s < limit)
+    assert np.all(np.diff(s) > 0)                      # still decreasing with f, i.e. rising to lower f
+    assert s[-1] == pytest.approx(limit, rel=1e-4)
+    # the unsaturated law diverges there
+    assert scale_frequency(1.0, 30.0, 1e-6) > 1e6 * limit
+
+
+def test_scale_frequency_saturation_respects_a_custom_exponent():
+    s = scale_frequency(1.0, 30.0, 1e-9, n=2.0, f_sat_mhz=4.0)
+    assert s == pytest.approx(2.0 * (30.0 / 4.0) ** 2.0, rel=1e-6)
+
+
+def test_xrap_saturates_below_5mhz_by_default_and_not_above():
+    # >= 5 MHz identical to the unsaturated law
+    for f in (5.0, 10.0, 30.0):
+        assert absorption(f, 0.0, 9e-4, grazing=False) == pytest.approx(
+            absorption(f, 0.0, 9e-4, grazing=False, freq_saturation_mhz=None))
+    # below 5 MHz smaller, and bounded
+    sat = absorption(3.75, 0.0, 9e-4, grazing=False)
+    raw = absorption(3.75, 0.0, 9e-4, grazing=False, freq_saturation_mhz=None)
+    assert sat < raw
+    assert sat == pytest.approx(12080.0 * 9e-4 * 2 * 30**1.5 / (3.75**1.5 + 5.0**1.5))
+    assert absorption(1e-6, 0.0, 9e-4, grazing=False) == pytest.approx(
+        12080.0 * 9e-4 * 2.0 * (30.0 / 5.0) ** 1.5, rel=1e-4)
+
+
+def test_saturation_corner_is_user_selectable():
+    # a higher corner saturates earlier -> a lower ceiling 2*(30/fs)^1.5 -> smaller value
+    a3 = absorption(2.0, 0.0, 9e-4, grazing=False, freq_saturation_mhz=3.0)
+    a8 = absorption(2.0, 0.0, 9e-4, grazing=False, freq_saturation_mhz=8.0)
+    assert a8 < a3 < absorption(2.0, 0.0, 9e-4, grazing=False, freq_saturation_mhz=None)
+
+
+def test_saturation_can_be_set_through_coeffs():
+    c = load_coefficients("xrap")
+    c["freq_saturation_mhz"] = None
+    assert absorption(3.75, 0.0, 9e-4, grazing=False, coeffs=c) == pytest.approx(
+        absorption(3.75, 0.0, 9e-4, grazing=False, freq_saturation_mhz=None))
+
+
+def test_drap2_is_unsaturated_by_default_but_can_opt_in():
+    assert load_coefficients("drap2").get("freq_saturation_mhz") is None
+    default = absorption(3.75, 0.0, 9e-4, model="drap2")
+    assert default == pytest.approx(absorption(3.75, 0.0, 9e-4, model="drap2",
+                                               freq_saturation_mhz=None))
+    opt_in = absorption(3.75, 0.0, 9e-4, model="drap2", freq_saturation_mhz=5.0)
+    assert opt_in < default
+    # unchanged at/above the corner
+    assert absorption(10.0, 0.0, 9e-4, model="drap2", freq_saturation_mhz=5.0) == pytest.approx(
+        absorption(10.0, 0.0, 9e-4, model="drap2"))
+
+
+def test_invalid_saturation_string_is_rejected():
+    with pytest.raises(ValueError):
+        absorption(3.75, 0.0, 9e-4, freq_saturation_mhz="banana")
