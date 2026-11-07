@@ -52,6 +52,9 @@ Scope and approximations
   full Croft-Hoogasian ray tracing). Raises if the requested frequency exceeds
   a hop's oblique MUF (no real solution).
 * No SNR / link-budget step -- this module stops at absorption (dB).
+* The vertical models are not validated far from their 30 MHz riometer
+  calibration, and neither saturates; pass ``max_db`` to scale the summed time
+  series' peak down to it (see :func:`oblique_absorption`).
 """
 
 from __future__ import annotations
@@ -60,7 +63,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .absorption import absorption
+from .absorption import _apply_max_db, absorption
 from .sza import EARTH_RADIUS_KM, solar_zenith_angle
 
 __all__ = [
@@ -409,6 +412,8 @@ def oblique_absorption(
     hmF2_km: float | None = None,
     ym_km: float | None = None,
     obliquity_exponent: float = 1.0,
+    max_db: float | None = None,
+    max_db_mode: str = "scale",
     freq_saturation_mhz: float | str | None = "default",
     clip_negative: bool = True,
 ) -> np.ndarray:
@@ -443,6 +448,19 @@ def oblique_absorption(
     obliquity_exponent : float
         Exponent of the secant factor; 1 (default) is the non-deviative
         path-length law (see the module docstring).
+    max_db : float, optional
+        Limit on the **summed** total (dB). The vertical models are linear in
+        flux and unbounded, so a strong flare on a long, low-frequency path can
+        reach thousands of dB -- far beyond any circuit's margin. With
+        ``max_db_mode="scale"`` (default) the **whole returned time series is
+        multiplied by one factor so its peak equals** ``max_db`` (only if the peak
+        exceeds it; :func:`xrap.absorption.peak_scale`): the shape is preserved,
+        there is no flat top. The factor depends on the window you pass, quiet
+        values are rescaled too, and series scaled separately are no longer
+        comparable. ``None`` (default) leaves the raw value.
+    max_db_mode : {"scale", "clip"}
+        ``"scale"`` (default) or ``"clip"`` (hard cut at ``max_db``; then
+        ``result >= max_db`` means "blackout").
     freq_saturation_mhz : float, None or "default"
         Low-frequency saturation of the vertical law, forwarded to
         :func:`xrap.absorption.absorption` (XRAP default 5 MHz; ``None`` disables).
@@ -474,4 +492,4 @@ def oblique_absorption(
     total = np.asarray(total, dtype=float)
     if clip_negative:
         total = np.maximum(total, 0.0)
-    return total
+    return _apply_max_db(total, max_db, max_db_mode)

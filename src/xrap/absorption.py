@@ -72,6 +72,7 @@ __all__ = [
     "reference_absorption",
     "highest_affected_frequency",
     "scale_frequency",
+    "peak_scale",
     "zenith_factor",
     "polar_cap_absorption",
     "load_coefficients",
@@ -126,6 +127,48 @@ def zenith_factor(
 
 
 # --------------------------------------------------------------------------- #
+# Peak scaling (max_db)
+# --------------------------------------------------------------------------- #
+def peak_scale(values, max_db: float):
+    """Scale a whole array by one factor so that its peak equals ``max_db``.
+
+    Down only: if the array's maximum is already ``<= max_db`` (or is not a
+    positive finite number) it is returned unchanged with factor 1. Otherwise
+    every element is multiplied by ``max_db / max(values)``, so the shape of a
+    time series -- the *relative* variation -- is preserved and its peak lands
+    exactly on ``max_db``.
+
+    Note that the factor depends on the whole array you pass (e.g. the length of
+    the time window), and that it rescales quiet values too; two series scaled
+    separately are no longer comparable with each other.
+
+    Returns
+    -------
+    (scaled, factor) : (numpy.ndarray, float)
+    """
+    v = np.asarray(values, dtype=float)
+    peak = np.nanmax(v) if v.size and not np.all(np.isnan(v)) else np.nan
+    if not np.isfinite(peak) or peak <= 0.0 or peak <= max_db:
+        return v, 1.0
+    factor = float(max_db) / float(peak)
+    # pin the peak element(s) to exactly max_db (avoids 99.99999999999999)
+    return np.where(v == peak, float(max_db), v * factor), factor
+
+
+def _apply_max_db(values, max_db: float | None, mode: str) -> np.ndarray:
+    """Apply the ``max_db`` limit: ``"scale"`` (peak scaling) or ``"clip"`` (hard cut)."""
+    if max_db is None:
+        return values
+    if not max_db > 0.0:
+        raise ValueError(f"max_db must be positive, got {max_db!r}")
+    if mode == "scale":
+        return peak_scale(values, max_db)[0]
+    if mode == "clip":
+        return np.minimum(values, max_db)
+    raise ValueError(f"max_db_mode must be 'scale' or 'clip', got {mode!r}")
+
+
+# --------------------------------------------------------------------------- #
 # Public entry point
 # --------------------------------------------------------------------------- #
 def absorption(
@@ -140,6 +183,8 @@ def absorption(
     alt_km: float = 90.0,
     H_km: float = 7.0,
     clip_negative: bool = True,
+    max_db: float | None = None,
+    max_db_mode: str = "scale",
     freq_saturation_mhz: float | str | None = "default",
 ) -> np.ndarray:
     """Solar-flare D-region absorption in dB.
@@ -166,6 +211,17 @@ def absorption(
         Absorbing-layer altitude / neutral scale height (grazing only).
     clip_negative : bool
         Clip the result to >= 0 dB.
+    max_db : float, optional
+        Limit on the result (dB). Neither model saturates, so low frequencies /
+        strong flares can reach hundreds of dB. With ``max_db_mode="scale"``
+        (default) the **whole returned array is multiplied by one factor so its
+        peak equals** ``max_db`` (only if the peak exceeds it; see
+        :func:`peak_scale`) -- the time-series shape is kept, no flat top. A
+        scalar result above ``max_db`` simply becomes ``max_db``. ``None``
+        (default) leaves the raw value.
+    max_db_mode : {"scale", "clip"}
+        ``"scale"`` (default): peak scaling as above. ``"clip"``: hard cut at
+        ``max_db`` (``result >= max_db`` then means "blackout").
     freq_saturation_mhz : float, None or "default"
         Low-frequency saturation corner (MHz; see :func:`scale_frequency`): the
         ``f**-n`` law is replaced below this frequency by a bounded one, so the
@@ -202,7 +258,7 @@ def absorption(
         L = 2.0 * L
     if clip_negative:
         L = np.maximum(L, 0.0)
-    return L
+    return _apply_max_db(L, max_db, max_db_mode)
 
 
 def reference_absorption(

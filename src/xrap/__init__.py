@@ -33,6 +33,7 @@ except ImportError:  # pragma: no cover - only during a source checkout without 
 from .absorption import (
     absorption,
     highest_affected_frequency,
+    peak_scale,
     reference_absorption,
     scale_frequency,
 )
@@ -53,6 +54,7 @@ __all__ = [
     "reference_absorption",
     "highest_affected_frequency",
     "scale_frequency",
+    "peak_scale",
     "fetch_goes_xrs",
     "fetch_goes_flares",
     "AbsorptionModel",

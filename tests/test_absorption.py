@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from xrap import absorption, reference_absorption, scale_frequency
+from xrap import absorption, peak_scale, reference_absorption, scale_frequency
 from xrap.absorption import highest_affected_frequency, load_coefficients, zenith_factor
 
 
@@ -197,6 +197,20 @@ def test_polar_cap_absorption_not_implemented():
 
 
 # --------------------------------------------------------------------------- #
+# max_db blackout cap
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("model", ["xrap", "drap2"])
+def test_max_db_caps_vertical_absorption(model):
+    raw = absorption(3.75, 20.0, 9e-4, model=model)
+    capped = absorption(3.75, 20.0, 9e-4, model=model, max_db=5.0)
+    assert raw > 5.0
+    assert capped == pytest.approx(5.0)
+    # below the cap: untouched
+    assert absorption(30.0, 20.0, 1e-6, model=model, max_db=5.0) == pytest.approx(
+        absorption(30.0, 20.0, 1e-6, model=model))
+
+
+# --------------------------------------------------------------------------- #
 # Low-frequency saturation of the f^-n law
 # --------------------------------------------------------------------------- #
 def test_scale_frequency_saturation_is_continuous_at_the_corner():
@@ -271,3 +285,70 @@ def test_drap2_is_unsaturated_by_default_but_can_opt_in():
 def test_invalid_saturation_string_is_rejected():
     with pytest.raises(ValueError):
         absorption(3.75, 0.0, 9e-4, freq_saturation_mhz="banana")
+
+
+# --------------------------------------------------------------------------- #
+# max_db: peak scaling of the whole series (default) vs hard clip
+# --------------------------------------------------------------------------- #
+def test_peak_scale_puts_the_peak_on_max_db_and_keeps_the_shape():
+    a = np.array([2.0, 10.0, 383.0, 73.0, 4.0])
+    s, k = peak_scale(a, 100.0)
+    assert s.max() == pytest.approx(100.0)
+    assert k == pytest.approx(100.0 / 383.0)
+    np.testing.assert_allclose(s / a, k)                 # one factor for every element
+    assert np.argmax(s) == np.argmax(a)
+    assert np.sum(s == 100.0) == 1                       # no flat top
+
+
+def test_peak_scale_never_scales_up():
+    a = np.array([1.0, 50.0, 3.0])
+    s, k = peak_scale(a, 100.0)
+    assert k == 1.0
+    np.testing.assert_array_equal(s, a)
+
+
+@pytest.mark.parametrize("bad", [np.array([np.nan, np.nan]), np.array([0.0, 0.0]), np.array([])])
+def test_peak_scale_leaves_degenerate_input_alone(bad):
+    s, k = peak_scale(bad, 10.0)
+    assert k == 1.0
+    np.testing.assert_array_equal(s, bad)
+
+
+def test_peak_scale_ignores_nans_when_finding_the_peak():
+    s, k = peak_scale(np.array([np.nan, 200.0, 20.0]), 100.0)
+    assert k == pytest.approx(0.5)
+    assert s[1] == pytest.approx(100.0) and s[2] == pytest.approx(10.0)
+
+
+def test_max_db_scales_an_absorption_time_series():
+    flux = np.array([1e-6, 9e-4, 1e-5])
+    raw = absorption(3.75, 20.0, flux)
+    sc = absorption(3.75, 20.0, flux, max_db=50.0)
+    assert raw.max() > 50.0
+    assert sc.max() == pytest.approx(50.0)
+    np.testing.assert_allclose(sc / raw, 50.0 / raw.max())   # shape preserved
+    assert sc[0] < raw[0]                                    # quiet values are rescaled too
+
+
+def test_max_db_clip_mode_is_the_old_hard_cut():
+    flux = np.array([1e-6, 9e-4, 1e-5])
+    raw = absorption(3.75, 20.0, flux)
+    cl = absorption(3.75, 20.0, flux, max_db=50.0, max_db_mode="clip")
+    np.testing.assert_allclose(cl, np.minimum(raw, 50.0))
+
+
+def test_max_db_below_the_peak_is_a_no_op_in_scale_mode():
+    flux = np.array([1e-6, 1e-5])
+    raw = absorption(30.0, 20.0, flux)
+    np.testing.assert_allclose(absorption(30.0, 20.0, flux, max_db=1e6), raw)
+
+
+@pytest.mark.parametrize("bad", [0.0, -5.0])
+def test_max_db_must_be_positive(bad):
+    with pytest.raises(ValueError):
+        absorption(10.0, 20.0, 1e-4, max_db=bad)
+
+
+def test_max_db_mode_rejects_unknown_values():
+    with pytest.raises(ValueError):
+        absorption(10.0, 20.0, 1e-4, max_db=5.0, max_db_mode="banana")

@@ -355,6 +355,28 @@ def test_obliquity_exponent_zero_removes_obliquity():
 
 
 # --------------------------------------------------------------------------- #
+# Blackout cap
+# --------------------------------------------------------------------------- #
+def test_max_db_caps_the_summed_total():
+    tx, rx = (10.0, 20.0), (10.0, 40.0)
+    kw = dict(height_km=300.0)
+    raw = float(np.ravel(oblique_absorption(tx, rx, "2017-09-06T12:00Z", 3.75, 9e-4, **kw))[0])
+    capped = float(np.ravel(oblique_absorption(tx, rx, "2017-09-06T12:00Z", 3.75, 9e-4,
+                                               max_db=60.0, **kw))[0])
+    assert raw > 60.0
+    assert capped == pytest.approx(60.0)            # result >= max_db  <=>  blackout
+
+
+def test_max_db_leaves_small_values_untouched():
+    tx, rx = (10.0, 20.0), (10.0, 40.0)
+    raw = oblique_absorption(tx, rx, "2017-09-06T12:00Z", 20.0, 1e-6, height_km=300.0)
+    capped = oblique_absorption(tx, rx, "2017-09-06T12:00Z", 20.0, 1e-6,
+                                height_km=300.0, max_db=60.0)
+    assert float(np.ravel(raw)[0]) < 60.0
+    assert capped == pytest.approx(raw)
+
+
+# --------------------------------------------------------------------------- #
 # Low-frequency saturation is forwarded through the oblique path
 # --------------------------------------------------------------------------- #
 def test_oblique_forwards_the_frequency_saturation():
@@ -371,3 +393,33 @@ def test_oblique_forwards_the_frequency_saturation():
     a = oblique_absorption(tx, rx, "2017-09-06T12:00Z", 10.0, 9e-4, **kw)
     b = oblique_absorption(tx, rx, "2017-09-06T12:00Z", 10.0, 9e-4, freq_saturation_mhz=None, **kw)
     assert a == pytest.approx(b)
+
+
+# --------------------------------------------------------------------------- #
+# max_db on an oblique time series: peak scaling (default) vs clip
+# --------------------------------------------------------------------------- #
+_T3 = ["2017-09-06T11:00Z", "2017-09-06T12:00Z", "2017-09-06T13:00Z"]
+_F3 = np.array([1e-6, 9e-4, 1e-5])
+
+
+def _series(**kw):
+    return np.ravel(oblique_absorption((10.0, 20.0), (10.0, 40.0), _T3, 3.75, _F3,
+                                       height_km=300.0, **kw))
+
+
+def test_max_db_scales_the_whole_oblique_series_to_the_peak():
+    raw, sc = _series(), _series(max_db=100.0)
+    assert raw.max() > 100.0
+    assert sc.max() == pytest.approx(100.0)
+    np.testing.assert_allclose(sc / raw, 100.0 / raw.max())     # one factor, shape kept
+    assert np.sum(np.isclose(sc, 100.0)) == 1                    # no flat top
+
+
+def test_max_db_clip_mode_flattens_the_oblique_peak():
+    raw, cl = _series(), _series(max_db=100.0, max_db_mode="clip")
+    np.testing.assert_allclose(cl, np.minimum(raw, 100.0))
+
+
+def test_max_db_scale_is_a_no_op_when_the_peak_is_below_it():
+    raw = _series()
+    np.testing.assert_allclose(_series(max_db=1e6), raw)
