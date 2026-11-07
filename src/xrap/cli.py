@@ -38,6 +38,11 @@ def build_parser() -> argparse.ArgumentParser:
     pp.add_argument("--goes-source", default="sunpy", choices=("sunpy", "noaa_json"))
     pp.add_argument("--satellite", default=None, help="e.g. 16 or GOES-16")
     pp.add_argument("--feed", default=None, help="noaa_json feed: 6-hour|1-day|3-day|7-day")
+    pp.add_argument(
+        "--flare-scale", action=argparse.BooleanOptionalAction, default=True,
+        help="put science-quality sunpy flux on the NOAA flare-class scale (x0.7); "
+             "--no-flare-scale returns the raw science flux (default: on)",
+    )
     pp.add_argument("--sza-method", default="noaa", choices=("noaa", "astropy"))
     pp.add_argument("--path", default="oneway", choices=("oneway", "total"))
     pp.add_argument(
@@ -54,6 +59,11 @@ def build_parser() -> argparse.ArgumentParser:
     pg.add_argument("--satellite", default=None, help="e.g. 16 or GOES-16")
     pg.add_argument("--resolution", default="1min", choices=("1min", "1s"))
     pg.add_argument("--feed", default=None, help="noaa_json feed: 6-hour|1-day|3-day|7-day")
+    pg.add_argument(
+        "--flare-scale", action=argparse.BooleanOptionalAction, default=True,
+        help="put science-quality sunpy flux on the NOAA flare-class scale (x0.7); "
+             "--no-flare-scale returns the raw science flux (default: on)",
+    )
     pg.add_argument("-o", "--output", help="output path (.nc -> netCDF, else CSV)")
     pg.add_argument("--plot", metavar="PNG", help="also save a flux-vs-time plot")
 
@@ -80,7 +90,7 @@ def _cmd_predict(args) -> int:
         path=args.path,
         grazing=args.grazing,
     )
-    goes_kwargs = {}
+    goes_kwargs = {"flare_scale": args.flare_scale}
     if args.satellite is not None:
         goes_kwargs["satellite"] = args.satellite
     if args.feed is not None:
@@ -113,6 +123,7 @@ def _cmd_fetch_goes(args) -> int:
         satellite=args.satellite,
         resolution=args.resolution,
         feed=args.feed,
+        flare_scale=args.flare_scale,
     )
 
     out = args.output

@@ -29,6 +29,22 @@ Retrieval routes (``source=``)
 
 All routes return the same :class:`xarray.Dataset` so downstream code is
 source-agnostic.
+
+Flux scale (important)
+----------------------
+The absorption models (XRAP's ``12080`` coefficient, DRAP2's HAF law) are
+defined on the **NOAA flare-class scale**, where ``X9.3 = 9.3e-4 W m-2``.
+That is *not* what the reprocessed science-quality GOES L2 data (the SunPy
+route) report: they carry the true irradiance, which is ``1/0.7`` times larger
+in the long band (the 2017-09-06 X9.3 flare reads 1.34e-3 on GOES-15 -- times
+0.7 gives 9.36e-4 = X9.3). The SWPC operational feeds are already on the
+flare-class scale (``observed_flux`` matches ``max_xrlong`` / the class to
+~0.1 %).
+
+So :func:`fetch_goes_xrs` multiplies the **science-quality** ``xrsb`` by
+:data:`FLARE_SCALE_XRSB` (0.7) by default (``flare_scale=True``) and leaves the
+SWPC feeds untouched; ``flare_scale=False`` returns the raw science flux. The
+short band ``xrsa`` is not rescaled (no model here uses it).
 """
 
 from __future__ import annotations
@@ -41,7 +57,7 @@ import pandas as pd
 import requests
 import xarray as xr
 
-__all__ = ["fetch_goes_xrs", "fetch_goes_flares", "XRSResult"]
+__all__ = ["fetch_goes_xrs", "fetch_goes_flares", "XRSResult", "FLARE_SCALE_XRSB"]
 
 Source = Literal["sunpy", "noaa_json", "netcdf_url", "local"]
 
@@ -60,6 +76,10 @@ _BAND_XRSA = "0.05-0.4nm"
 _BAND_XRSB = "0.1-0.8nm"
 
 _HTTP_TIMEOUT = 30  # seconds
+
+#: Multiplier taking science-quality (true-irradiance) GOES ``xrsb`` onto the
+#: NOAA flare-class scale on which the absorption models are calibrated.
+FLARE_SCALE_XRSB = 0.7
 
 
 @dataclass
@@ -96,6 +116,7 @@ def fetch_goes_xrs(
     satellite: str | int | None = None,
     resolution: str = "1min",
     feed: str | None = None,
+    flare_scale: bool = True,
     cache: bool = True,
     url: str | None = None,
     path: str | None = None,
@@ -120,6 +141,12 @@ def fetch_goes_xrs(
     feed : {"6-hour", "1-day", "3-day", "7-day"}, optional
         ``noaa_json`` only -- force a specific SWPC feed instead of auto-picking
         the narrowest one that covers ``[start, end]``.
+    flare_scale : bool, default True
+        Put science-quality ``xrsb`` (``source="sunpy"``) on the NOAA
+        flare-class scale (``* 0.7``; see the module docstring) -- the scale
+        the absorption models are calibrated on. ``False`` returns the raw
+        science flux. No effect on ``noaa_json``, which is already on the
+        flare-class scale.
     cache : bool
         Cache SunPy downloads under :func:`_cache_dir`.
     url, path : str, optional
@@ -130,7 +157,8 @@ def fetch_goes_xrs(
     xarray.Dataset
         ``xrsa`` / ``xrsb`` in W m-2 on a UTC ``time`` index. Gaps are kept as
         NaN, not interpolated. ``.attrs`` records ``satellite``, ``source``,
-        ``quality``, band definitions and units.
+        ``quality``, ``flux_scale`` (``"flare-class"`` or ``"science"``), band
+        definitions and units.
     """
     open_ended = source == "noaa_json" and feed is not None
     start = pd.to_datetime(start, utc=True) if start is not None else (
@@ -159,8 +187,12 @@ def fetch_goes_xrs(
     else:  # pragma: no cover - guarded by Literal
         raise ValueError(f"unknown source {source!r}")
 
+    scaled = flare_scale and res.source == "sunpy"
+    if scaled:
+        res.data["xrsb"] = res.data["xrsb"] * FLARE_SCALE_XRSB
     res.data.attrs.update(
-        satellite=res.satellite, source=res.source, quality=res.quality
+        satellite=res.satellite, source=res.source, quality=res.quality,
+        flux_scale="flare-class" if (scaled or res.source == "noaa_json") else "science",
     )
     return res.data
 

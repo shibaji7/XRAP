@@ -11,7 +11,15 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from xrap.goes import _resolve_feed, _sat_number, fetch_goes_flares, fetch_goes_xrs
+from xrap.goes import (
+    FLARE_SCALE_XRSB,
+    XRSResult,
+    _resolve_feed,
+    _sat_number,
+    _to_dataset,
+    fetch_goes_flares,
+    fetch_goes_xrs,
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -182,3 +190,44 @@ def test_noaa_json_route_live():
     assert ds.sizes["time"] > 0
     assert ds.attrs["quality"] == "nrt"
     assert np.nanmedian(ds["xrsb"].values) > 0
+
+
+# --------------------------------------------------------------------------- #
+# Flux scale: science-quality (SunPy) -> NOAA flare-class scale (x0.7)
+# --------------------------------------------------------------------------- #
+def _fake_sunpy(mocker):
+    t = pd.date_range("2017-09-06T12:00", periods=3, freq="1min")
+    mocker.patch("xrap.goes._fetch_sunpy", side_effect=lambda *a, **k: XRSResult(
+        _to_dataset(t, [1e-7] * 3, [1.0e-3, 1.3372e-3, 1.0e-3]),
+        satellite="GOES-15", source="sunpy", quality="science"))
+
+
+def test_flare_scale_constant_is_point_seven():
+    assert FLARE_SCALE_XRSB == 0.7
+
+
+def test_sunpy_route_puts_xrsb_on_the_flare_class_scale_by_default(mocker):
+    _fake_sunpy(mocker)
+    ds = fetch_goes_xrs("2017-09-06T11:59", "2017-09-06T12:05", source="sunpy")
+    # the 2017-09-06 X9.3 flare: GOES-15 science 1.3372e-3 -> class scale 9.36e-4
+    assert ds["xrsb"].values[1] == pytest.approx(1.3372e-3 * 0.7)
+    assert ds["xrsb"].values[1] / 1e-4 == pytest.approx(9.3, abs=0.1)   # "X9.3"
+    assert ds["xrsa"].values[0] == pytest.approx(1e-7)                  # short band untouched
+    assert ds.attrs["flux_scale"] == "flare-class"
+
+
+def test_flare_scale_can_be_disabled(mocker):
+    _fake_sunpy(mocker)
+    ds = fetch_goes_xrs("2017-09-06T11:59", "2017-09-06T12:05", source="sunpy",
+                        flare_scale=False)
+    assert ds["xrsb"].values[1] == pytest.approx(1.3372e-3)
+    assert ds.attrs["flux_scale"] == "science"
+
+
+def test_noaa_json_is_never_rescaled(mocker):
+    now = pd.Timestamp.now(tz="UTC").floor("min")
+    mocker.patch("xrap.goes._get_json", return_value=_fake_xrays_records(
+        pd.date_range(now - pd.Timedelta(minutes=2), periods=3, freq="1min")))
+    ds = fetch_goes_xrs(source="noaa_json", feed="6-hour")           # flare_scale default True
+    np.testing.assert_allclose(ds["xrsb"].values[0], 4e-7)           # observed_flux as-is
+    assert ds.attrs["flux_scale"] == "flare-class"

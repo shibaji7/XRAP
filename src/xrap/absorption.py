@@ -23,6 +23,14 @@ Two models, selected with ``model=``:
 
 Both return **one-way** vertical absorption; ``path="total"`` doubles it.
 
+Flux scale
+----------
+``flux`` must be on the **NOAA flare-class scale** (``X9.3 = 9.3e-4 W m-2``),
+which is what both models are calibrated on. Science-quality GOES L2 data are
+~1/0.7 larger in the long band; :func:`xrap.fetch_goes_xrs` converts them
+(``flare_scale=True``, default). If you pass your own science-quality flux,
+multiply it by 0.7 first.
+
 Zenith-angle handling
 ---------------------
 ``g(chi)`` / the ``(cos chi)`` taper is either
@@ -133,7 +141,8 @@ def absorption(
     sza_deg : float or array-like
         Solar zenith angle (degrees).
     xray_wm2 : float or array-like
-        GOES 0.1-0.8 nm long-band flux (W m-2).
+        GOES 0.1-0.8 nm long-band flux (W m-2) on the NOAA flare-class scale
+        (``X9.3 = 9.3e-4``; see the module docstring).
     model : {"xrap", "drap2"}
         Which model (see module docstring). Default ``"xrap"``.
     coeffs : dict, optional

@@ -11,6 +11,7 @@ import pytest
 from xrap import hop_crossings, oblique_absorption, obliquity_factor, solar_zenith_angle
 from xrap.absorption import absorption
 from xrap.oblique import (
+    crossing_geometry,
     great_circle_distance,
     incidence_angle,
     intermediate_point,
@@ -146,12 +147,13 @@ def test_obliquity_factor_grows_with_incidence():
     assert a < b < c
 
 
-def test_obliquity_factor_matches_secant_law_n():
-    # sec(chi)^(n+1); default n=1.5 -> exponent 2.5
+def test_obliquity_factor_is_plain_secant_by_default():
+    # non-deviative path-length secant at the actual frequency: exponent 1
     chi = 40.0
     sec = 1.0 / np.cos(np.radians(chi))
-    assert obliquity_factor(chi, n=1.5) == pytest.approx(sec**2.5)
-    assert obliquity_factor(chi, n=0.0) == pytest.approx(sec)
+    assert obliquity_factor(chi) == pytest.approx(sec)
+    assert obliquity_factor(chi, exponent=2.5) == pytest.approx(sec**2.5)
+    assert obliquity_factor(chi, exponent=0.0) == pytest.approx(1.0)
 
 
 # --------------------------------------------------------------------------- #
@@ -254,3 +256,99 @@ def test_oblique_absorption_drap2_model():
     total = oblique_absorption(tx, rx, "2017-09-06T12:00Z", 10.0, 1e-5,
                                model="drap2", height_km=300.0)
     assert total > 0.0
+
+
+# --------------------------------------------------------------------------- #
+# D-region incidence angle (curved-earth Bouguer geometry)
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("d_km", [500.0, 1500.0, 3000.0])
+def test_crossing_geometry_at_mirror_height_reproduces_half_hop(d_km):
+    """A chord crossing the *mirror* height must land at half the hop with the
+    mirror incidence angle -- ties the Bouguer chord formula to the
+    closed-form incidence_angle() pair."""
+    inc_mirror, beta = incidence_angle(d_km, 300.0)
+    inc, rng = crossing_geometry(beta, 300.0)
+    assert rng == pytest.approx(d_km / 2.0, rel=1e-6)
+    assert inc == pytest.approx(inc_mirror, abs=1e-6)
+
+
+def test_crossing_geometry_zero_altitude_is_the_transmitter():
+    inc, rng = crossing_geometry(30.0, 0.0)
+    assert rng == pytest.approx(0.0, abs=1e-6)
+    assert inc == pytest.approx(60.0)
+
+
+def test_d_region_incidence_exceeds_mirror_incidence_on_curved_earth():
+    """The ray's angle from vertical grows toward the ground (r sin(theta) = const)."""
+    cr = hop_crossings((10.0, 20.0), (10.0, 45.0), n_hops=1, height_km=300.0,
+                       earth_model="curved")[0]
+    assert cr.incidence_deg > cr.mirror_incidence_deg + 3.0
+
+
+def test_d_region_incidence_equals_mirror_incidence_on_flat_earth():
+    cr = hop_crossings((10.0, 20.0), (10.0, 45.0), n_hops=1, height_km=300.0,
+                       earth_model="flat")[0]
+    assert cr.incidence_deg == pytest.approx(cr.mirror_incidence_deg)
+
+
+def test_long_hop_obliquity_uses_the_90km_angle_not_the_reflection_angle():
+    """Regression for the 'slant angle taken at the reflection height' bug:
+    for a ~3000 km hop the D-region secant is ~1.7x the mirror secant."""
+    cr = hop_crossings((10.0, 20.0), (10.0, 20.0 + 3000.0 / 111.2), n_hops=1,
+                       height_km=300.0)[0]
+    ratio = obliquity_factor(cr.incidence_deg) / obliquity_factor(cr.mirror_incidence_deg)
+    assert 1.5 < ratio < 1.9
+
+
+def test_flat_and_curved_crossing_locations_agree_for_short_hops():
+    a = crossing_geometry(45.0, 90.0, earth_model="flat")
+    b = crossing_geometry(45.0, 90.0, earth_model="curved")
+    assert a[1] == pytest.approx(b[1], rel=0.05)
+    assert a[0] == pytest.approx(b[0], abs=1.0)
+
+
+# --------------------------------------------------------------------------- #
+# Obliquity law: sec(chi_D) at the actual frequency, independent of n
+# --------------------------------------------------------------------------- #
+def _vertical_crossing_sum(tx, rx, time, f, flux, **kw):
+    cr = hop_crossings(tx, rx, n_hops=1, height_km=300.0)
+    return cr, sum(
+        float(np.ravel(absorption(
+            f, solar_zenith_angle(c.lat, c.lon, time, method="noaa"), flux,
+            model="xrap", path="oneway", grazing=False, **kw))[0])
+        for c in cr
+    )
+
+
+def test_oblique_equals_secant_times_vertical_sum_exactly():
+    tx, rx = (10.0, 20.0), (10.0, 40.0)
+    cr, vsum = _vertical_crossing_sum(tx, rx, "2017-09-06T12:00Z", 10.0, 1e-4)
+    total = oblique_absorption(tx, rx, "2017-09-06T12:00Z", 10.0, 1e-4,
+                               height_km=300.0, grazing=False)
+    assert float(np.ravel(total)[0]) == pytest.approx(
+        float(obliquity_factor(cr[0].incidence_deg)) * vsum, rel=1e-9)
+
+
+def test_obliquity_does_not_depend_on_the_frequency_exponent():
+    """The old sec^(n+1) double-counted obliquity: the oblique/vertical ratio
+    must be sec(chi_D) whatever n the vertical model uses."""
+    from xrap.absorption import load_coefficients
+
+    tx, rx = (10.0, 20.0), (10.0, 40.0)
+    ratios = []
+    for n in (0.5, 1.5, 2.0):
+        c = load_coefficients("xrap")
+        c["freq_exponent"] = n
+        cr, vsum = _vertical_crossing_sum(tx, rx, "2017-09-06T12:00Z", 10.0, 1e-4, coeffs=c)
+        tot = oblique_absorption(tx, rx, "2017-09-06T12:00Z", 10.0, 1e-4,
+                                 height_km=300.0, grazing=False, coeffs=c)
+        ratios.append(float(np.ravel(tot)[0]) / vsum)
+    assert ratios == pytest.approx([float(obliquity_factor(cr[0].incidence_deg))] * 3, rel=1e-9)
+
+
+def test_obliquity_exponent_zero_removes_obliquity():
+    tx, rx = (10.0, 20.0), (10.0, 40.0)
+    _, vsum = _vertical_crossing_sum(tx, rx, "2017-09-06T12:00Z", 10.0, 1e-4)
+    tot = oblique_absorption(tx, rx, "2017-09-06T12:00Z", 10.0, 1e-4, height_km=300.0,
+                             grazing=False, obliquity_exponent=0.0)
+    assert float(np.ravel(tot)[0]) == pytest.approx(vsum, rel=1e-9)

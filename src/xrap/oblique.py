@@ -7,31 +7,41 @@ the D region twice per hop (once going up, once coming down) -- each crossing
 generally at a different location (hence a different solar zenith angle) and
 at non-vertical incidence.
 
-The classical (non-deviative-absorption) treatment -- the **secant law** /
-Martyn's theorem -- says a ray hitting the D region at incidence angle ``chi_i``
-(from vertical) behaves like a *vertical* ray at the equivalent frequency
-``f * cos(chi_i)``::
+D-region absorption is *non-deviative*: the plasma there is far too thin to bend
+the ray, so the wave crosses it in a straight line at the actual wave frequency
+``f``. From the absorption coefficient ``kappa ~ N nu / (mu (omega**2 + nu**2))``
+and ``ds = dh / cos(theta)``, an oblique crossing at incidence ``chi_D`` (angle
+from vertical **at the absorbing height**) accumulates exactly ``sec(chi_D)``
+times the vertical absorption at the same frequency::
 
-    L_oblique(f, chi_i) = sec(chi_i) * L_vertical(f * cos(chi_i))
+    L_oblique(f, chi_D) = sec(chi_D) * L_vertical(f)                        (1)
 
-Both bundled models have ``L_vertical(f) ~ f**-n`` (``n = freq_exponent``,
-1.5), so this collapses to a closed-form obliquity factor::
+independent of the exponent ``n`` in ``L_vertical ~ f**-n``. This is also the
+structure of ITU-R P.533-14 eq. (20) (one ``sec i`` factor, actual-frequency
+``(f + f_L)**-2``; the equivalent-vertical-frequency ``f_v = f cos i`` enters
+only through a bounded penetration factor, not as a power of ``cos``).
 
-    L_oblique(f, chi_i) = sec(chi_i)**(n + 1) * L_vertical(f)      # see obliquity_factor
+Two ways to get this wrong, both of which an earlier version of this module
+did: (a) evaluate the incidence angle at the F-layer reflection height rather
+than at the D region -- on a curved Earth the ray's angle from local vertical
+grows toward the ground (Bouguer: ``r sin(theta) = const``), e.g. 72 deg at
+300 km but 80 deg at 90 km on a 3000 km hop; (b) multiply ``sec`` by a
+Martyn-style equivalent-frequency shift ``f -> f cos(chi)`` as well, which
+double-counts the obliquity and gives ``sec(chi)**(n+1)``.
 
 This module supplies the geometry (:func:`hop_crossings`) to locate every
-D-region crossing of an ``n_hops``-hop path and its incidence angle, then
-sums the per-crossing, obliquity-corrected, SZA-dependent vertical absorption
-(:func:`oblique_absorption`).
+D-region crossing of an ``n_hops``-hop path and its incidence angle *at the
+D-region height*, then sums the per-crossing, obliquity-corrected,
+SZA-dependent vertical absorption (:func:`oblique_absorption`).
 
 Scope and approximations
 -------------------------
 * Non-deviative D-region absorption only (same regime as the vertical models);
   no F-region deviative-absorption or MUF-cusp enhancement.
-* The two D-region crossings of a hop are located along the **straight line
-  from the ground to the hop's reflection apex** -- exact under the flat-earth
-  geometry, and an approximation under curved-earth (good because the D region,
-  ~90 km, sits well below the typical F-layer reflection height, ~250-350 km).
+* Each hop's ray is the **straight chord from the ground to its reflection
+  apex** (the usual virtual-mirror model). Both the D-region incidence angle
+  and the two crossing locations follow *exactly* from that chord on either
+  Earth model.
 * ``earth_model``: ``"flat"`` (planar/equirectangular -- fine to a few 1000 km,
   simple, no pole/date-line handling) or ``"curved"`` (spherical, mean Earth
   radius, great-circle geometry). User-selectable throughout.
@@ -50,7 +60,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .absorption import absorption, load_coefficients
+from .absorption import absorption
 from .sza import EARTH_RADIUS_KM, solar_zenith_angle
 
 __all__ = [
@@ -58,6 +68,7 @@ __all__ = [
     "great_circle_distance",
     "intermediate_point",
     "incidence_angle",
+    "crossing_geometry",
     "reflection_height",
     "obliquity_factor",
     "hop_crossings",
@@ -81,9 +92,14 @@ class HopCrossing:
         Distance from the transmitter along the tx-rx path.
     reflection_height_km : float
         F-layer virtual reflection height used for this hop.
-    incidence_deg, elevation_deg : float
-        Ray incidence angle (from vertical, at the D-region crossing) and
-        ground elevation angle.
+    incidence_deg : float
+        Ray incidence angle from vertical **at the D-region crossing height**
+        (``alt_km``) -- the angle the secant law needs.
+    elevation_deg : float
+        Ground elevation angle of the hop.
+    mirror_incidence_deg : float
+        Incidence angle at the F-layer reflection point (smaller than
+        ``incidence_deg`` on a curved Earth; kept for reference only).
     """
 
     hop: int
@@ -94,6 +110,7 @@ class HopCrossing:
     reflection_height_km: float
     incidence_deg: float
     elevation_deg: float
+    mirror_incidence_deg: float = float("nan")
 
 
 # --------------------------------------------------------------------------- #
@@ -158,13 +175,16 @@ def incidence_angle(
     earth_model: str = "curved",
     R_km: float = EARTH_RADIUS_KM,
 ):
-    """Ray incidence angle (from vertical) and ground elevation angle for a
-    single hop of ``ground_range_km`` reflecting at virtual height ``height_km``.
+    """Incidence angle **at the reflection point** and ground elevation angle
+    for a single hop of ``ground_range_km`` reflecting at virtual height
+    ``height_km``.
 
-    Standard secant-law geometry (e.g. Davies, *Ionospheric Radio*). Under the
-    straight-line-to-apex approximation this incidence angle is the same
-    everywhere along the ray below the apex, so it also applies at the
-    D-region crossing height (see module docstring).
+    Standard secant-law geometry (e.g. Davies, *Ionospheric Radio*). The
+    returned incidence angle is the one at the *mirror* (height ``height_km``),
+    which is what the reflection condition needs. It is **not** the angle at
+    the D region: on a curved Earth the ray's angle from local vertical varies
+    with height (Bouguer's invariant), so use :func:`crossing_geometry` for the
+    absorbing layer.
 
     Returns
     -------
@@ -183,6 +203,38 @@ def incidence_angle(
             np.arcsin(np.clip(R_km / (R_km + height_km) * np.cos(np.radians(elevation)), -1.0, 1.0))
         )
         return float(incidence), float(elevation)
+    raise ValueError(f"earth_model must be 'flat' or 'curved', got {earth_model!r}")
+
+
+def crossing_geometry(
+    elevation_deg: float,
+    alt_km: float,
+    *,
+    earth_model: str = "curved",
+    R_km: float = EARTH_RADIUS_KM,
+):
+    """Where, and at what incidence, a ray of ground elevation ``elevation_deg``
+    crosses height ``alt_km`` on its way up (straight-chord ray).
+
+    * flat: incidence = ``90 - elevation``; ground range = ``alt_km / tan(elevation)``.
+    * curved: Bouguer's invariant gives the incidence angle at radius
+      ``R + alt_km``,  ``sin(chi) = R cos(elevation) / (R + alt_km)``, and the
+      triangle (Earth centre)-(transmitter)-(crossing point) gives the central
+      angle ``psi = 90 deg - elevation - chi``, i.e. ground range ``R * psi``.
+
+    Returns
+    -------
+    (incidence_deg, ground_range_km)
+        Incidence angle from vertical at ``alt_km``, and the ground distance
+        from the transmitter to the crossing point.
+    """
+    beta = np.radians(elevation_deg)
+    if earth_model == "flat":
+        return float(90.0 - elevation_deg), float(alt_km / np.tan(beta))
+    if earth_model == "curved":
+        chi = np.arcsin(np.clip(R_km * np.cos(beta) / (R_km + alt_km), -1.0, 1.0))
+        psi = max(np.pi / 2.0 - beta - chi, 0.0)
+        return float(np.degrees(chi)), float(R_km * psi)
     raise ValueError(f"earth_model must be 'flat' or 'curved', got {earth_model!r}")
 
 
@@ -261,15 +313,16 @@ def reflection_height(
 # --------------------------------------------------------------------------- #
 # Secant-law obliquity factor
 # --------------------------------------------------------------------------- #
-def obliquity_factor(incidence_deg, *, n: float = 1.5):
-    """Secant-law obliquity factor ``sec(incidence)**(n + 1)``.
+def obliquity_factor(incidence_deg, *, exponent: float = 1.0):
+    """Secant obliquity factor ``sec(incidence)**exponent``.
 
-    ``L_oblique(f, incidence) = obliquity_factor(incidence, n) * L_vertical(f)``
-    for a vertical-absorption law ``L_vertical(f) ~ f**-n`` (``n = freq_exponent``
-    of the absorption model, 1.5 for both bundled models).
+    ``L_oblique(f, chi_D) = obliquity_factor(chi_D) * L_vertical(f)`` with
+    ``chi_D`` the incidence angle **at the D-region height** and ``exponent = 1``
+    (non-deviative path-length secant at the actual frequency; see the module
+    docstring). Other exponents are available for experiments only.
     """
     chi = np.radians(np.asarray(incidence_deg, dtype=float))
-    return 1.0 / np.cos(chi) ** (n + 1.0)
+    return 1.0 / np.cos(chi) ** exponent
 
 
 # --------------------------------------------------------------------------- #
@@ -292,10 +345,10 @@ def hop_crossings(
     """The ``2 * n_hops`` D-region crossings of an ``n_hops``-hop tx-rx path.
 
     Each hop is split at its ground-range midpoint (the reflection apex); the
-    two D-region crossings (ascending / descending) are located along the
-    straight line from the ground to that apex, at altitude ``alt_km`` (see
-    module docstring). ``freq_mhz`` is only used by
-    ``height_model="parabolic"``.
+    two D-region crossings (ascending / descending) are where the straight
+    chord from the ground to that apex passes through ``alt_km``
+    (:func:`crossing_geometry`), each carrying the incidence angle at that
+    height. ``freq_mhz`` is only used by ``height_model="parabolic"``.
     """
     if n_hops < 1:
         raise ValueError("n_hops must be >= 1")
@@ -305,7 +358,7 @@ def hop_crossings(
 
     crossings: list[HopCrossing] = []
     for i in range(n_hops):
-        h, incidence, elevation = reflection_height(
+        h, mirror_incidence, elevation = reflection_height(
             freq_mhz if freq_mhz is not None else float("nan"),
             d_hop,
             height_model=height_model,
@@ -315,10 +368,10 @@ def hop_crossings(
             ym_km=ym_km,
             earth_model=earth_model,
         )
-        frac = min(alt_km / h, 1.0) if h > 0 else 1.0  # fraction of the half-hop "rise"
+        incidence, up_range = crossing_geometry(elevation, alt_km, earth_model=earth_model)
+        up_range = min(up_range, 0.5 * d_hop)  # apex below alt_km: cross at the apex
         hop_start = i * d_hop
-        for leg, range_from_start in (("up", 0.5 * d_hop * frac),
-                                      ("down", d_hop - 0.5 * d_hop * frac)):
+        for leg, range_from_start in (("up", up_range), ("down", d_hop - up_range)):
             ground_range = hop_start + range_from_start
             lat, lon = intermediate_point(tx, rx, ground_range / d_total, earth_model=earth_model)
             crossings.append(
@@ -326,6 +379,7 @@ def hop_crossings(
                     hop=i, leg=leg, lat=lat, lon=lon,
                     ground_range_km=ground_range, reflection_height_km=h,
                     incidence_deg=incidence, elevation_deg=elevation,
+                    mirror_incidence_deg=mirror_incidence,
                 )
             )
     return crossings
@@ -354,14 +408,16 @@ def oblique_absorption(
     foF2_mhz: float | None = None,
     hmF2_km: float | None = None,
     ym_km: float | None = None,
-    freq_exponent: float | None = None,
+    obliquity_exponent: float = 1.0,
     clip_negative: bool = True,
 ) -> np.ndarray:
     """Total oblique HF absorption (dB) for an ``n_hops``-hop tx-rx circuit.
 
-    Sums the secant-law-corrected, SZA-dependent vertical absorption
+    Sums the obliquity-corrected, SZA-dependent vertical absorption
     (:func:`xrap.absorption.absorption`, ``path="oneway"``) over every
-    D-region crossing (:func:`hop_crossings`) of the path.
+    D-region crossing (:func:`hop_crossings`) of the path:
+    ``sum_i sec(chi_i)**obliquity_exponent * L_vertical(f, SZA_i, flux)``, with
+    ``chi_i`` the incidence angle at the D-region height.
 
     Parameters
     ----------
@@ -372,7 +428,9 @@ def oblique_absorption(
     freq_mhz : float
         HF operating frequency (MHz).
     xray_wm2 : float or array-like
-        GOES 0.1-0.8 nm flux (W m-2), broadcast against ``time``.
+        GOES 0.1-0.8 nm flux (W m-2) **on the NOAA flare-class scale**
+        (``X9.3 = 9.3e-4``) -- what :func:`xrap.fetch_goes_xrs` returns by
+        default. Broadcast against ``time``.
     n_hops : int
         Number of ionospheric hops.
     model, coeffs, grazing, alt_km, H_km
@@ -381,9 +439,9 @@ def oblique_absorption(
         Forwarded to :func:`xrap.solar_zenith_angle`.
     earth_model, height_model, height_km, foF2_mhz, hmF2_km, ym_km
         Forwarded to :func:`hop_crossings` / :func:`reflection_height`.
-    freq_exponent : float, optional
-        Exponent for :func:`obliquity_factor`; defaults to the model's
-        ``freq_exponent`` (1.5).
+    obliquity_exponent : float
+        Exponent of the secant factor; 1 (default) is the non-deviative
+        path-length law (see the module docstring).
     clip_negative : bool
         Clip the summed result to >= 0 dB.
 
@@ -393,9 +451,6 @@ def oblique_absorption(
         Total absorption (dB) along the path, broadcast over ``time`` /
         ``xray_wm2``.
     """
-    c = coeffs if coeffs is not None else load_coefficients(model)
-    n = c["freq_exponent"] if freq_exponent is None else freq_exponent
-
     crossings = hop_crossings(
         tx, rx, n_hops, alt_km=alt_km, freq_mhz=freq_mhz, earth_model=earth_model,
         height_model=height_model, height_km=height_km,
@@ -406,10 +461,10 @@ def oblique_absorption(
     for cr in crossings:
         chi = solar_zenith_angle(cr.lat, cr.lon, time, method=sza_method)
         L_v = absorption(
-            freq_mhz, chi, xray_wm2, model=model, coeffs=c, path="oneway",
+            freq_mhz, chi, xray_wm2, model=model, coeffs=coeffs, path="oneway",
             grazing=grazing, alt_km=alt_km, H_km=H_km, clip_negative=False,
         )
-        total = total + obliquity_factor(cr.incidence_deg, n=n) * L_v
+        total = total + obliquity_factor(cr.incidence_deg, exponent=obliquity_exponent) * L_v
 
     total = np.asarray(total, dtype=float)
     if clip_negative:
