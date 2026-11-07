@@ -37,6 +37,17 @@ def _saturation_arg(text: str):
         raise argparse.ArgumentTypeError(f"expected a number, 'none' or 'default', got {text!r}") from None
 
 
+def _positive_float(text: str) -> float:
+    """``--max-db``: a positive number of dB."""
+    try:
+        v = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected a positive number, got {text!r}") from None
+    if not v > 0.0:
+        raise argparse.ArgumentTypeError(f"must be positive, got {text!r}")
+    return v
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="xrap", description="X-Ray Absorption Prediction (DRAP2 solar-flare)")
     sub = p.add_subparsers(dest="command", required=True)
@@ -62,6 +73,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--freq-saturation", type=_saturation_arg, default="default", metavar="MHZ|none",
         help="low-frequency saturation corner of the f^-1.5 law (default: 5 MHz for xrap, "
              "off for drap2); 'none' disables it",
+    )
+    pp.add_argument(
+        "--max-db", type=_positive_float, default=None, metavar="DB",
+        help="limit the absorption: with --max-db-mode scale (default) the whole series is "
+             "multiplied by one factor so its peak equals DB (only if it exceeds it); the "
+             "unlimited values are also written as absorption_raw_db",
+    )
+    pp.add_argument(
+        "--max-db-mode", default="scale", choices=("scale", "clip"),
+        help="scale: peak scaling (default); clip: hard cut at --max-db",
     )
     pp.add_argument(
         "--grazing", action=argparse.BooleanOptionalAction, default=None,
@@ -108,6 +129,8 @@ def _cmd_predict(args) -> int:
         path=args.path,
         grazing=args.grazing,
         freq_saturation_mhz=args.freq_saturation,
+        max_db=args.max_db,
+        max_db_mode=args.max_db_mode,
     )
     goes_kwargs = {"flare_scale": args.flare_scale}
     if args.satellite is not None:

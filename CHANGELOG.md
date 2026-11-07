@@ -6,6 +6,13 @@ oblique/multi-hop absorption via the secant law").
 
 ## Unreleased
 
+### Added (latest)
+
+- `max_db` / `max_db_mode` on `AbsorptionModel` and `xrap predict --max-db DB
+  --max-db-mode scale|clip`. When `max_db` is set, `predict()` and the CLI CSV also
+  carry an `absorption_raw_db` column (peak scaling is irreversible); without it the
+  output columns are unchanged.
+
 ### Fixed
 
 - **Flux scale.** The models (XRAP's `12080`, DRAP2's HAF law) are calibrated on
@@ -64,8 +71,7 @@ Net effect on oblique totals: about 3–3.6× lower on 1500–3500 km hops. See
 
 - GOES `xrsb_quality` flags are returned but not filtered (e.g. GOES-15 flatlines
   at ~7e-10 through 09:00–09:29 UT on 2017-09-06).
-- `max_db` is Python-API only (`absorption()`, `oblique_absorption()`); it is not on
-  `AbsorptionModel` or the CLI.
+- `oblique_absorption()` has no CLI command.
 - `netcdf_url` / `local` GOES routes and `polar_cap_absorption()` are stubs.
 - The 5 MHz saturation corner is a placeholder, not calibrated against data.
 

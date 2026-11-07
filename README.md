@@ -120,7 +120,7 @@ dB_20 = xrap.scale_frequency(dB, f0_mhz=10.0, f_mhz=20.0)        # n=1.5
 dB_20 = xrap.scale_frequency(dB, f0_mhz=10.0, f_mhz=20.0, n=2.0) # custom exponent
 
 # …or end to end
-model = xrap.AbsorptionModel(freq_mhz=10.0, model="xrap")
+model = xrap.AbsorptionModel(freq_mhz=10.0, model="xrap")   # max_db=100 scales the series' peak to 100 dB
 df = model.predict(lat=40.0, lon=-105.0,
                    start="2017-09-06T11:00", end="2017-09-06T13:00")
 
@@ -219,6 +219,8 @@ xrap predict --lat 52 --lon 13 --freq 8 \
 | `--flare-scale` / `--no-flare-scale` | on | put SunPy science flux on the NOAA flare-class scale (×0.7); `--no-flare-scale` keeps the raw flux |
 | `--sza-method` | `noaa` | `noaa` (analytic) or `astropy` (ephemeris) |
 | `--path` | `oneway` | `oneway` or `total` (round-trip) absorption |
+| `--max-db DB` | off | scale the whole series so its peak equals `DB` (down only; shape kept); also writes an `absorption_raw_db` column |
+| `--max-db-mode` | `scale` | `scale` (peak scaling) or `clip` (hard cut at `--max-db`) |
 | `--freq-saturation` | per-model | low-frequency corner (MHz) below which the `f^-1.5` law saturates; `none` disables (default: 5 MHz for `xrap`, off for `drap2`) |
 | `-o`, `--output` | stdout | write CSV to this path |
 | `--plot PNG` | — | also save an absorption-vs-time figure |

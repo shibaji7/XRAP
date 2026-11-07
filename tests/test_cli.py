@@ -115,3 +115,41 @@ def test_predict_freq_saturation_changes_low_frequency_output(tmp_path, syntheti
 
     assert peak(["--freq-saturation", "none"]) > peak([])              # default 5 MHz saturates
     assert peak(["--freq-saturation", "5"]) == pytest.approx(peak([]))
+
+
+# --------------------------------------------------------------------------- #
+# --max-db / --max-db-mode
+# --------------------------------------------------------------------------- #
+def _run_predict(tmp_path, extra):
+    out = tmp_path / "o.csv"
+    main(["predict", "--lat", "10", "--lon", "30", "--freq", "3.75",
+          "--start", "2017-09-06T11:30", "--end", "2017-09-06T12:30",
+          "-o", str(out), *extra])
+    return pd.read_csv(out, index_col=0)
+
+
+def test_predict_max_db_scales_the_series_and_writes_the_raw_column(tmp_path, synthetic_xrs, mocker):
+    mocker.patch("xrap.model.fetch_goes_xrs", return_value=synthetic_xrs)
+    base = _run_predict(tmp_path, [])
+    df = _run_predict(tmp_path, ["--max-db", "40"])
+    assert "absorption_raw_db" not in base.columns
+    assert base["absorption_db"].max() > 40.0
+    assert df["absorption_db"].max() == pytest.approx(40.0)
+    assert df["absorption_raw_db"].max() == pytest.approx(base["absorption_db"].max())
+    # shape preserved: one factor for every row
+    ratio = (df["absorption_db"] / df["absorption_raw_db"]).dropna()
+    assert ratio.max() == pytest.approx(ratio.min())
+
+
+def test_predict_max_db_clip_mode(tmp_path, synthetic_xrs, mocker):
+    mocker.patch("xrap.model.fetch_goes_xrs", return_value=synthetic_xrs)
+    df = _run_predict(tmp_path, ["--max-db", "40", "--max-db-mode", "clip"])
+    assert df["absorption_db"].max() == pytest.approx(40.0)
+    assert (df["absorption_db"] == 40.0).sum() > 1            # flat top
+
+
+@pytest.mark.parametrize("bad", ["0", "-5", "banana"])
+def test_predict_rejects_a_non_positive_max_db(bad):
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["predict", "--lat", "0", "--lon", "0",
+                                   "--start", "a", "--end", "b", "--max-db", bad])

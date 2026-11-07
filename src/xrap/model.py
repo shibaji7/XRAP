@@ -43,6 +43,16 @@ class AbsorptionModel:
         Absorbing-layer altitude and neutral scale height (grazing only).
     freq_saturation_mhz : float, None or "default"
         Low-frequency saturation corner (see :func:`xrap.absorption`).
+    max_db : float, optional
+        Limit on the absorption (dB); see :func:`xrap.absorption`. With
+        ``max_db_mode="scale"`` (default) the **whole series returned by**
+        :meth:`predict` **is multiplied by one factor so its peak equals**
+        ``max_db`` (only if the peak exceeds it; shape preserved); the factor
+        depends on the window. ``predict_point`` returns ``min(value, max_db)``.
+        When set, :meth:`predict` also returns the unlimited values in an
+        ``absorption_raw_db`` column.
+    max_db_mode : {"scale", "clip"}
+        ``"scale"`` (default) or a hard ``"clip"`` at ``max_db``.
     coeffs : dict, optional
         Coefficient override; defaults to the bundled set for ``model``.
     """
@@ -56,14 +66,17 @@ class AbsorptionModel:
     alt_km: float = 90.0
     H_km: float = 7.0
     freq_saturation_mhz: float | str | None = "default"
+    max_db: float | None = None
+    max_db_mode: str = "scale"
     coeffs: dict | None = None
 
-    def _absorption(self, freq_mhz, sza_deg, xray_wm2):
+    def _absorption(self, freq_mhz, sza_deg, xray_wm2, *, limit: bool = True):
         return absorption(
             freq_mhz, sza_deg, xray_wm2,
             model=self.model, coeffs=self.coeffs, path=self.path,
             grazing=self.grazing, alt_km=self.alt_km, H_km=self.H_km,
             freq_saturation_mhz=self.freq_saturation_mhz,
+            max_db=self.max_db if limit else None, max_db_mode=self.max_db_mode,
         )
 
     def predict(
@@ -95,7 +108,9 @@ class AbsorptionModel:
         Returns
         -------
         pandas.DataFrame
-            Indexed by UTC time, columns ``sza_deg``, ``xrsb``, ``absorption_db``.
+            Indexed by UTC time, columns ``sza_deg``, ``xrsb``, ``absorption_db``
+            (limited by ``max_db`` if set) and, only when ``max_db`` is set,
+            ``absorption_raw_db`` (the unlimited values).
         """
         f = freq_mhz if freq_mhz is not None else self.freq_mhz
 
@@ -108,10 +123,13 @@ class AbsorptionModel:
 
         L = self._absorption(f, chi, phi)
 
-        return pd.DataFrame(
+        df = pd.DataFrame(
             {"sza_deg": chi, "xrsb": phi, "absorption_db": L},
             index=pd.Index(times, name="time"),
         )
+        if self.max_db is not None:  # scaling is irreversible: keep the raw values too
+            df["absorption_raw_db"] = self._absorption(f, chi, phi, limit=False)
+        return df
 
     def predict_point(self, lat: float, lon: float, time, xray_wm2: float,
                       *, freq_mhz: float | None = None) -> float:

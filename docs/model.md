@@ -191,12 +191,15 @@ this stops at absorption (dB).
 - `xrap predict --lat --lon --freq --start --end` -> absorption CSV (+ `--plot`);
   flags `--model xrap|drap2`, `--grazing/--no-grazing`, `--goes-source`,
   `--satellite`, `--feed`, `--flare-scale/--no-flare-scale`, `--sza-method`,
-  `--path`, `--freq-saturation MHZ|none`.
+  `--path`, `--freq-saturation MHZ|none`, `--max-db DB`, `--max-db-mode scale|clip`.
 - `xrap fetch-goes --start --end` -> `.nc` (netCDF) or CSV (+ `--plot`); flags
   `--source`, `--satellite`, `--resolution`, `--feed`,
   `--flare-scale/--no-flare-scale`.
-- `max_db` / `oblique_absorption` are Python-API only (not exposed on the CLI or
-  `AbsorptionModel`).
+- `--max-db DB` limits the absorption (`scale`, default: the whole series is
+  multiplied by one factor so its peak equals `DB`, only if it exceeds it; `clip`:
+  hard cut); the unlimited values are also written as `absorption_raw_db`, since
+  scaling is irreversible. `AbsorptionModel(max_db=, max_db_mode=)` is the same
+  setting in Python. `oblique_absorption()` is Python-API only (no CLI).
 
 ## Plots (`src/xrap/plot.py`)  [DONE]
 

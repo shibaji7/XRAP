@@ -266,6 +266,9 @@ result above `max_db` simply becomes `max_db`. Things to keep in mind:
   frequency factor that peak scaling removes;
 - `result >= max_db` is no longer a blackout flag -- only the peak sits on it.
 
+(`max_db` / `max_db_mode` are also on `AbsorptionModel` and `xrap predict --max-db`;
+there the unlimited values are kept in an `absorption_raw_db` column.)
+
 `max_db_mode="clip"` restores the hard cut (`np.minimum`, so `result >= max_db`
 means blackout, and values below it are untouched). Pick `max_db` at or above the
 largest clear-sky SNR of any circuit you model if you use the cut; call with
