@@ -49,9 +49,12 @@ def _overlay(dfs, title, name):
 
 
 def main() -> None:
-    # GOES flux + absorption overlay for the 2017-09-06 flares
-    ds = fetch_goes_xrs("2017-09-06T09:00", "2017-09-06T15:00", source="sunpy", satellite=16)
-    ax = plot_xrs(ds, title="GOES-16 XRS  —  2017-09-06 (X2.2 at 09:10, X9.3 at 12:02 UT)")
+    # GOES flux + absorption overlay for the 2017-09-06 X9.3 flare. GOES-15 is the
+    # satellite behind the official X9.3 classification; fetch_goes_xrs puts its
+    # science-quality flux on the flare-class scale (x0.7), so the peak reads X9.36.
+    # (GOES-15 has a data dropout 09:00-09:20 UT, so the window starts at 11:00.)
+    ds = fetch_goes_xrs("2017-09-06T11:00", "2017-09-06T15:00", source="sunpy", satellite=15)
+    ax = plot_xrs(ds, title="GOES-15 XRS (flare-class scale)  —  2017-09-06, X9.3 flare at 12:02 UT")
     ax.figure.savefig(IMG / "goes_xrs_2017-09-06.png", dpi=120)
     plt.close(ax.figure)
     _overlay(

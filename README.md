@@ -23,7 +23,7 @@ model fit to the NRCan 30 MHz riometer network
 
 ```
 A(f0) = 12080 * flux[W/m^2] * cos(chi)     # dB, one-way, f0 = 30 MHz, A >= 0
-A(f)  = (f0 / f)^1.5 * A(f0)
+A(f)  = (f0 / f)^1.5 * A(f0)               # f >= 5 MHz; saturates (bounded) below 5 MHz
 ```
 
 **`"drap2"`** — NOAA Global D-Region Absorption Prediction v2, X-ray term
@@ -35,7 +35,11 @@ HAF(chi) = HAF0 * (cos chi)^0.75           # 0 for chi >= 90 deg
 A(f,chi) = 0.5 * (HAF(chi) / f)^1.5        # dB, one-way
 ```
 
-`flux` is the GOES 0.1–0.8 nm long band. Near the terminator the `cos(chi)`
+`flux` is the GOES 0.1–0.8 nm long band **on the NOAA flare-class scale**
+(`X9.3 = 9.3e-4 W/m²`; science-quality data are ×0.7-scaled for you, see
+[`docs/model.md`](docs/model.md#flux-scale-read-this-first)). Below
+`freq_saturation_mhz` (default 5 MHz, user-selectable) XRAP's `f^-1.5` law
+saturates instead of diverging. Near the terminator the `cos(chi)`
 factor is either hard-clipped at 90° (`grazing=False`) or replaced by the
 Chapman grazing function `1/Ch(chi)` (`grazing=True`, the default for `"xrap"`)
 — a small positive value that decays smoothly to zero at the true terminator
@@ -49,6 +53,8 @@ DRAP2 underestimates strong flares.
 > the `xrap` CLI, and the plot helpers are implemented and tested. Still stubbed:
 > the `netcdf_url` / `local` GOES routes (pre-2010 / archived events) and
 > `polar_cap_absorption` (DRAP2 SEP term) — both raise `NotImplementedError`.
+> See [`CHANGELOG.md`](CHANGELOG.md) for recent corrections (flux scale, oblique
+> geometry/law) and breaking API changes.
 
 ## Install (from GitHub, into a local environment)
 
@@ -94,7 +100,9 @@ import xrap
 # 1. SZA from lat/lon/time
 chi = xrap.solar_zenith_angle(lat=40.0, lon=-105.0, time="2017-09-06T12:02Z")
 
-# 2. GOES X-ray flux (SunPy; any flare from 2010 onward)
+# 2. GOES X-ray flux (SunPy; any flare from 2010 onward). xrsb comes back on the
+#    NOAA flare-class scale the models are calibrated on (X9.3 = 9.3e-4 W/m2):
+#    science-quality flux x0.7. flare_scale=False returns the raw science flux.
 xrs = xrap.fetch_goes_xrs("2017-09-06T11:00", "2017-09-06T13:00")
 
 # 3. Absorption in dB
@@ -123,14 +131,18 @@ dB_oblique = xrap.oblique_absorption(tx, rx, "2017-09-06T12:02Z", 10.0, xray_wm2
                                      height_km=300.0)
 #   height_model="parabolic", foF2_mhz=..., hmF2_km=..., ym_km=...  -> frequency-dependent
 #   reflection height instead of a fixed one
+#   max_db=100  -> scale the whole series so its peak = 100 dB (shape kept; down only);
+#                  max_db_mode="clip" for a hard cut instead (result >= max_db = blackout)
+#   freq_saturation_mhz=5 (XRAP default; None disables) -> bounded f^-1.5 law below 5 MHz
+#   (even so, an X9 flare at 3.75 MHz is ~194 dB vertically: use max_db)
 ```
 
 ### GOES data sources
 
 | `source`     | Coverage                        | Notes                                    |
 |--------------|---------------------------------|------------------------------------------|
-| `sunpy`      | ~2010 → present                 | science-quality, via `Fido`; `resolution="1min"`/`"1s"` (default) |
-| `noaa_json`  | last ~7 days                    | SWPC operational feed; `observed_flux`, narrowest feed auto-picked |
+| `sunpy`      | ~2010 → present                 | science-quality, via `Fido`; `resolution="1min"`/`"1s"` (default); `xrsb` ×0.7 → flare-class scale (`flare_scale=False` for raw) |
+| `noaa_json`  | last ~7 days                    | SWPC operational feed (already flare-class scale); `observed_flux`, narrowest feed auto-picked |
 | `netcdf_url` | pre-2010 / reprocessed archives | pass `url=` (NOAA NCEI GOES science data) — *not yet implemented* |
 | `local`      | anything                        | pass `path=` to a local netCDF/CSV — *not yet implemented* |
 
@@ -204,8 +216,10 @@ xrap predict --lat 52 --lon 13 --freq 8 \
 | `--goes-source` | `sunpy` | `sunpy` (≥2010, science) or `noaa_json` (≤7 days) |
 | `--satellite` | auto | e.g. `16` or `GOES-16` |
 | `--feed` | auto | `noaa_json` only: `6-hour` / `1-day` / `3-day` / `7-day` |
+| `--flare-scale` / `--no-flare-scale` | on | put SunPy science flux on the NOAA flare-class scale (×0.7); `--no-flare-scale` keeps the raw flux |
 | `--sza-method` | `noaa` | `noaa` (analytic) or `astropy` (ephemeris) |
 | `--path` | `oneway` | `oneway` or `total` (round-trip) absorption |
+| `--freq-saturation` | per-model | low-frequency corner (MHz) below which the `f^-1.5` law saturates; `none` disables (default: 5 MHz for `xrap`, off for `drap2`) |
 | `-o`, `--output` | stdout | write CSV to this path |
 | `--plot PNG` | — | also save an absorption-vs-time figure |
 
@@ -225,6 +239,7 @@ xrap fetch-goes --source noaa_json --feed 1-day --plot xrs.png -o xrs.csv
 | `--satellite` | auto | e.g. `16` |
 | `--resolution` | `1min` | `sunpy` only: `1min` (`avg1m`) or `1s` (`flx1s`) |
 | `--feed` | auto | `noaa_json` feed; with it, `--start`/`--end` may be omitted |
+| `--flare-scale` / `--no-flare-scale` | on | SunPy flux ×0.7 → flare-class scale (see above) |
 | `-o`, `--output` | stdout | `.nc` → netCDF, else CSV |
 | `--plot PNG` | — | also save a flux-vs-time figure |
 
@@ -273,6 +288,8 @@ docs/
   oblique.md              oblique/multi-hop absorption: secant-law derivation + worked example
   make_figures.py         regenerate the figures in model.md (needs network + matplotlib)
   make_oblique_figures.py regenerate the figure in oblique.md (needs network + matplotlib)
+  make_maxdb_figure.py    regenerate the max_db peak-scaling figure (needs network + matplotlib)
+CHANGELOG.md       notable changes, incl. breaking API changes
   images/                 generated figures
 ```
 
@@ -284,11 +301,13 @@ vertical models, the terminator / Chapman-grazing treatment, and a worked
 `log10(flux)` form underestimates strong flares (low by ~3× at X1, ~19× at X10)
 while the two models cross over around M2.
 
-[`docs/oblique.md`](docs/oblique.md) — the **secant-law derivation** (from
-Bouguer's theorem and Martyn's equivalence theorem) for oblique/multi-hop
-absorption, the flat- vs curved-earth hop geometry, the fixed vs
-quasi-parabolic reflection-height models, and a worked example validated
-against the analytic obliquity factor to 0.2%.
+[`docs/oblique.md`](docs/oblique.md) — the **secant-law derivation** (non-deviative
+absorption, Bouguer's invariant, cross-checked against ITU-R P.533-14 eq. 20) for
+oblique/multi-hop absorption, the flat- vs curved-earth hop geometry, the
+incidence angle at the D-region height, the fixed vs quasi-parabolic
+reflection-height models, the blackout-cap guidance, a worked example validated
+exactly against `sec(chi_D)`, and a public record of corrections to the first
+version.
 
 ## References
 

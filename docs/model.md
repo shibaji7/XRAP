@@ -1,8 +1,31 @@
 # XRAP model notes
 
-Common inputs: `phi` = GOES 0.1-0.8 nm flux (W m^-2), `chi` = solar zenith angle
-at the absorbing point (deg), `f` = HF frequency (MHz). Both models return
-**one-way** vertical absorption; `path="total"` doubles it. `A >= 0`.
+Common inputs: `phi` = GOES 0.1-0.8 nm flux (W m^-2) **on the NOAA flare-class
+scale**, `chi` = solar zenith angle at the absorbing point (deg), `f` = HF
+frequency (MHz). Both models return **one-way** vertical absorption;
+`path="total"` doubles it. `A >= 0`.
+
+### Flux scale (read this first)
+
+Both models are calibrated on the **flare-class scale**, where `X9.3 = 9.3e-4
+W m^-2`. The reprocessed science-quality GOES L2 data that SunPy returns carry
+the true irradiance, which is `1/0.7` larger in the long band: the 2017-09-06
+flare reads 1.34e-3 on GOES-15 (GOES-16: 1.46e-3), and `1.3372e-3 x 0.7 =
+9.36e-4 = X9.3`. The SWPC operational feeds (`noaa_json`) are already on the
+class scale (`observed_flux` matches the flare-class value to ~0.1% across
+recent flares).
+
+So `fetch_goes_xrs()` multiplies the science-quality `xrsb` by
+`FLARE_SCALE_XRSB = 0.7` by default (`flare_scale=True`; CLI `--flare-scale /
+--no-flare-scale`) and leaves `noaa_json` alone. `ds.attrs["flux_scale"]` records
+which you have (`"flare-class"` / `"science"`). If you pass your own science-quality
+flux to `absorption()`, multiply by 0.7 first. Feeding raw GOES-16 science flux
+into XRAP overstates absorption by `1/0.7 = 1.43x` (linear in flux).
+
+**Data quality:** the L2 files carry `xrsb_quality` flags, which are returned but
+**not** filtered. E.g. GOES-15 flatlines at ~7e-10 (flag 2) through 09:00-09:29 UT
+on 2017-09-06 -- the X2.2 flare is missing there, so the figures below use the
+clean 11:00-15:00 window.
 
 `absorption(f, chi, phi, model="xrap"|"drap2", ...)` dispatches;
 `AbsorptionModel(model=...)` and `xrap predict --model ...` follow.
@@ -13,12 +36,13 @@ doi:10.1016/j.jastp.2022.105843 — data-optimized fit to the NRCan 30 MHz
 riometer network.
 
     A(f0) = C * phi^p_I * g(chi)^p_c        # dB, one-way, f0 = 30 MHz
-    A(f)  = (f0 / f)^n * A(f0)
+    A(f)  = (f0 / f)^n * A(f0)              # f >= f_s;  2 f0^n/(f^n + f_s^n) * A(f0) below f_s
 
-`C = 12080`, `p_I = 1`, `p_c = 1`, `n = 1.5` (Hargreaves; Parthasarathy et al.
+`f_s = freq_saturation_mhz` (default 5 MHz; see *Low-frequency saturation* under
+[Oblique-path absorption](#oblique-path-absorption)). `C = 12080`, `p_I = 1`, `p_c = 1`, `n = 1.5` (Hargreaves; Parthasarathy et al.
 1963). `reference_absorption(chi, phi)` returns `A(f0)`. The exponents are in
 `src/xrap/data/xrap.json` (`scale`, `flux_exponent`, `cos_exponent`, `f0_mhz`,
-`freq_exponent`) so the paper's optimized coefficient sets drop in via
+`freq_exponent`, `freq_saturation_mhz`) so the paper's optimized coefficient sets drop in via
 `coeffs=`.
 
 ## "drap2" — NOAA Global D-Region Absorption Prediction v2   [IMPLEMENTED]
@@ -70,11 +94,13 @@ predicts more, and by X-class DRAP2 is low by a factor of several to ~20×.
 
 ![10 MHz absorption, 2017-09-06 flares](images/absorption_2017-09-06_10MHz_models.png)
 
-The 2017-09-06 **X9.3** flare at 10 MHz: XRAP peaks near **77 dB**, DRAP2 near
-**3 dB**. 77 dB is a complete HF blackout — which is exactly what was observed
-(HF comms were dead for ~1 h). DRAP2's 3 dB would wrongly imply usable HF
-throughout. This is the underestimate Fiori et al. (2022) set out to fix by
-refitting to riometer data.
+The 2017-09-06 **X9.3** flare (GOES-15, class scale, peak `9.36e-4` = X9.36) at
+10 MHz, 20°N 30°E: XRAP peaks near **49 dB**, DRAP2 near **2.7 dB** one-way.
+49 dB is a complete HF blackout — consistent with what was observed (HF comms
+were dead for ~1 h) — whereas DRAP2's 2.7 dB would imply usable HF throughout.
+This is the underestimate Fiori et al. (2022) set out to fix by refitting to
+riometer data. (Hand check at 33.0° SZA: `12080 x 9.36e-4 x cos(33.0°) x
+(30/10)^1.5 = 49.3 dB`; the code gives 49.35 with its default grazing factor.)
 
 ![10 MHz absorption, last 24 h](images/absorption_last24h_10MHz_models.png)
 
@@ -116,20 +142,39 @@ ionization-rate factor, for which `1/Ch` is the correct grazing generalization),
 
 `absorption()` is vertical. For a real tx-rx circuit (oblique incidence, 1+
 hops), `src/xrap/oblique.py` -- `oblique_absorption(tx, rx, time, freq_mhz,
-xray_wm2, n_hops=1, ...)` -- applies the classical secant law (Martyn's
-theorem, non-deviative D-region absorption) over every D-region crossing of
-the path, each at its own incidence angle and its own SZA. Two independent,
-user-selectable choices: `earth_model="curved"|"flat"` (hop geometry) and
-`height_model="fixed"|"parabolic"` (F-layer reflection height).
+xray_wm2, n_hops=1, ...)` -- sums the vertical absorption over every D-region
+crossing of the path, each at its own SZA, multiplied by the path-length
+secant `sec(chi_D)` where `chi_D` is the incidence angle **at the D-region
+height** (not at the F-layer reflection height) and the frequency is the actual
+wave frequency (non-deviative absorption; same structure as ITU-R P.533-14
+eq. 20). Two independent, user-selectable choices: `earth_model="curved"|"flat"`
+(hop geometry) and `height_model="fixed"|"parabolic"` (F-layer reflection
+height).
 
 **Full derivation, citations, and a worked/validated example: see
 [oblique.md](oblique.md).**
 
-**Caveat:** neither vertical model saturates, so a strong flare on an oblique,
-low-elevation multi-hop path can produce absorption in the hundreds to
-thousands of dB -- correctly signalling "complete blackout," not a literal,
-meaningful link-margin number (no blackout clip is built in). No SNR / link
-budget -- this stops at absorption (dB).
+**Low-frequency saturation:** the `f^-1.5` law diverges toward 0 Hz, so XRAP
+saturates it below `freq_saturation_mhz` (default 5 MHz; `S(f) = 2 f0^n /
+(f^n + fs^n)` below the corner, continuous, power law unchanged above, bounded by
+`2 (30/5)^1.5 = 29.4`). It is user-selectable (`freq_saturation_mhz=` on
+`absorption()` / `oblique_absorption()` / `AbsorptionModel`, `--freq-saturation
+MHZ|none` on the CLI, or `coeffs`); `None` disables it. DRAP2 keeps its published,
+unsaturated form unless you opt in. Derivation and numbers: [oblique.md §5.1](oblique.md).
+
+**`max_db` (peak scaling):** saturation removes the divergence toward low
+frequency, but the models still don't saturate in flux (XRAP is linear), so a
+strong flare on a low-frequency or long multi-hop path can reach thousands of dB --
+e.g. at 80 m (3.75 MHz) a *vertical* X9 crossing is ~194 dB (246 dB without
+saturation). Those numbers mean "blackout," not a literal margin, and the models
+are not validated that far from their 30 MHz calibration. Pass `max_db=` to
+`absorption()` / `oblique_absorption()`: the **whole returned series is multiplied
+by one factor so its peak equals `max_db`** (only when the peak exceeds it; shape
+preserved, no flat top; `xrap.peak_scale()` returns the factor). The factor depends
+on the window, quiet values are rescaled too, and separately-scaled series are not
+comparable; `max_db_mode="clip"` gives the old hard cut (`result >= max_db` =
+blackout). Details: [oblique.md §5.1](oblique.md). No SNR / link budget here --
+this stops at absorption (dB).
 
 ## Out of scope
 
@@ -145,9 +190,13 @@ budget -- this stops at absorption (dB).
 
 - `xrap predict --lat --lon --freq --start --end` -> absorption CSV (+ `--plot`);
   flags `--model xrap|drap2`, `--grazing/--no-grazing`, `--goes-source`,
-  `--satellite`, `--feed`, `--sza-method`, `--path`.
+  `--satellite`, `--feed`, `--flare-scale/--no-flare-scale`, `--sza-method`,
+  `--path`, `--freq-saturation MHZ|none`.
 - `xrap fetch-goes --start --end` -> `.nc` (netCDF) or CSV (+ `--plot`); flags
-  `--source`, `--satellite`, `--resolution`, `--feed`.
+  `--source`, `--satellite`, `--resolution`, `--feed`,
+  `--flare-scale/--no-flare-scale`.
+- `max_db` / `oblique_absorption` are Python-API only (not exposed on the CLI or
+  `AbsorptionModel`).
 
 ## Plots (`src/xrap/plot.py`)  [DONE]
 
